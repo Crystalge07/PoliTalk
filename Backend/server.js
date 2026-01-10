@@ -110,7 +110,7 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
         Based on the transcript, return a JSON object with:
         - bias_score (1-10)
         - bias_label (short string like 'Center-Left', 'Strong Right')
-        - key_terms (array of political keywords or topics mentioned)
+        - key_terms (MUST include at least 3-5 keywords if political, e.g., ['Traditionalism', 'Role of Women', 'Propaganda'])
         
         Response must be valid JSON only.`;
 

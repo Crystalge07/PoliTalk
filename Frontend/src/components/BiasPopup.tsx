@@ -46,7 +46,10 @@ export const BiasPopup = () => {
         (d: any) => {
           console.log('PoliTok UI: Result received', d);
           setData(d);
-          setIsExpanded(true); // Auto-expand when new data arrives
+          setIsExpanded(true); // Auto-expand popup
+          if (d.key_terms && d.key_terms.length > 0) {
+            setKeywordsOpen(true); // Auto-expand keywords
+          }
         }
       );
       return cleanup;
@@ -133,11 +136,18 @@ export const BiasPopup = () => {
           <span className="text-lg font-bold tracking-tight">{displayData.bias_label}</span>
         </div>
 
-        {/* Keywords Dropdown */}
+        {displayData.transcription && status !== 'error' && (
+          <div className="p-3 rounded-lg bg-secondary/20 border border-white/5 max-h-[100px] overflow-y-auto">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">Transcription</p>
+            <p className="text-xs text-foreground italic leading-relaxed">"{displayData.transcription}"</p>
+          </div>
+        )}
+
+        {/* Keywords Dropdown - Moved below transcription */}
         {displayData.key_terms.length > 0 && (
           <Collapsible open={keywordsOpen} onOpenChange={setKeywordsOpen}>
             <CollapsibleTrigger className="flex items-center justify-between w-full p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors group">
-              <span className="text-sm font-medium text-foreground">Key Terms Detected</span>
+              <span className="text-sm font-medium text-foreground">Key Indicative Terms</span>
               <ChevronDown
                 className={cn(
                   "w-4 h-4 text-muted-foreground transition-transform duration-200 group-hover:text-foreground",
@@ -150,18 +160,12 @@ export const BiasPopup = () => {
             </CollapsibleContent>
           </Collapsible>
         )}
-        {/* Transcription or Error Details */}
+
+        {/* Error Details */}
         {status === 'error' && errorDetails && (
           <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 max-h-[100px] overflow-y-auto">
             <p className="text-[10px] uppercase tracking-wider text-destructive mb-1 font-bold">Error Details</p>
             <p className="text-xs text-foreground italic leading-relaxed">{errorDetails}</p>
-          </div>
-        )}
-
-        {displayData.transcription && status !== 'error' && (
-          <div className="p-3 rounded-lg bg-secondary/20 border border-white/5 max-h-[100px] overflow-y-auto">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">Transcription</p>
-            <p className="text-xs text-foreground italic leading-relaxed">"{displayData.transcription}"</p>
           </div>
         )}
 
