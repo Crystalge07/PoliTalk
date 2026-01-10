@@ -55,7 +55,7 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
 
         // 1. Upload the file to Gemini
         const uploadResponse = await fileManager.uploadFile(filePath, {
-            mimeType: "video/mp4",
+            mimeType: "video/webm",
             displayName: "PoliTok Upload " + Date.now(),
         });
         console.log(`Uploaded file ${uploadResponse.file.displayName} as: ${uploadResponse.file.uri}`);
@@ -73,9 +73,9 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
             throw new Error(`File processing failed. State: ${file.state}`);
         }
 
-        // 3. Generate Content (Transcribe)
+        // 3. Generate Content
         const model = genAI.getGenerativeModel({
-            model: "gemini-1.5-flash",
+            model: "gemini-flash-latest",
         });
 
         const result = await model.generateContent([
@@ -85,38 +85,28 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
                     fileUri: file.uri
                 }
             },
-            { text: "Listen to the audio in this video and provide a full transcription of the speech. Return ONLY the transcription text, nothing else." }
+            { text: "Analyze this video for political bias. Determine: 1. A bias score (1-10, where 1 is strong left, 5 is center, 10 is strong right). 2. A bias label (e.g., 'Strong Left', 'Center-Right', etc.). 3. A list of key political terms or topics mentioned. 4. A brief transcription of the relevant speech. Return the result strictly as a JSON object with these keys: bias_score, bias_label, key_terms, transcription." }
         ]);
 
-        const transcription = result.response.text();
-        console.log('Transcription complete.');
+        const text = result.response.text();
+        console.log('Gemini raw response:', text);
 
-        // Return the transcription
-        // Adapting the original mock response structure to include transcription, 
-        // effectively replacing the mock logic. 
-        // NOTE: The original request asked to "listen and transcribe". 
-        // The original mock returned bias_score, bias_label, key_terms. 
-        // I will keep those as mocks for now OR try to derive them? 
-        // The user specifically asked "to listen and transcribe". 
-        // expecting the user might want just the transcription or the full analysis based on it.
-        // For now I will return the transcription and keep the mock metadata for the frontend compatibility until asked otherwise,
-        // OR better, I can ask Gemini for those too if I change the prompt.
-        // Let's stick to the specific request: "listen and transcribe". 
-        // But to not break the frontend expectation (server.js implies this endpoint returns bias info),
-        // I should probably return the transcription as a field or just the text.
-        // Looking at the previous code: it returned { bias_score, bias_label, key_terms }.
-        // I'll add `transcription` to the response.
+        // Extract JSON if wrapped in markdown
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        const analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+
+        if (!analysis) {
+            throw new Error('Failed to parse Gemini response as JSON');
+        }
 
         const responseData = {
-            transcription: transcription,
-            // Keeping mock data for now to ensure frontend doesn't break if it expects these fields
-            // In a real scenario, we should ask Gemini to generate these based on the transcription.
-            bias_score: Math.floor(Math.random() * 10) + 1,
-            bias_label: ['Left', 'Center', 'Right'][Math.floor(Math.random() * 3)],
-            key_terms: ["inflation", "policy", "mock_term"]
+            transcription: analysis.transcription || "No speech detected.",
+            bias_score: analysis.bias_score || 5,
+            bias_label: analysis.bias_label || "Neutral",
+            key_terms: analysis.key_terms || []
         };
 
-        console.log('Analysis complete');
+        console.log('Analysis complete:', responseData.bias_label);
         res.json(responseData);
 
     } catch (error) {
