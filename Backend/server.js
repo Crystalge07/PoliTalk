@@ -3,11 +3,24 @@ const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios');
+const FormData = require('form-data');
 require('dotenv').config();
-// const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const app = express();
 const port = 3000;
+
+if (process.env.GEMINI_API_KEY) {
+    console.log('Gemini API Key loaded successfully (starts with:', process.env.GEMINI_API_KEY.substring(0, 4) + '...)');
+} else {
+    console.error('CRITICAL ERROR: GEMINI_API_KEY not found in environment!');
+}
+
+if (process.env.ELEVENLABS_API_KEY) {
+    console.log('ElevenLabs API Key loaded successfully (starts with:', process.env.ELEVENLABS_API_KEY.substring(0, 4) + '...)');
+} else {
+    console.warn('WARNING: ELEVENLABS_API_KEY not found in environment. Transcription will fail.');
+}
 
 // Middleware
 app.use(cors());
@@ -25,12 +38,13 @@ const storage = multer.diskStorage({
         cb(null, uploadDir)
     },
     filename: function (req, file, cb) {
-        // Use timestamp to avoid collisions
         cb(null, 'temp_' + Date.now() + path.extname(file.originalname));
     }
 });
 
 const upload = multer({ storage: storage });
+
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // Analyze Endpoint
 app.post('/analyze', upload.single('video'), async (req, res) => {
@@ -41,55 +55,52 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
     const filePath = req.file.path;
     console.log('Video received:', filePath);
 
+    let transcription = "";
+
     try {
-        // --- GEMINI INTEGRATION ---
+        // --- STEP 1: ELEVENLABS TRANSCRIPTION ---
+        console.log('Transcribing with ElevenLabs...');
 
-        // Initialize Gemini API
-        const { GoogleGenerativeAI } = require("@google/generative-ai");
-        const { GoogleAIFileManager } = require("@google/generative-ai/server");
+        const form = new FormData();
+        form.append('file', fs.createReadStream(filePath));
+        form.append('model_id', 'scribe_v1');
+        // form.append('tag', 'politok'); // Optional
 
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY);
-
-        console.log('Processing video with Gemini...');
-
-        // 1. Upload the file to Gemini
-        const uploadResponse = await fileManager.uploadFile(filePath, {
-            mimeType: "video/webm",
-            displayName: "PoliTok Upload " + Date.now(),
-        });
-        console.log(`Uploaded file ${uploadResponse.file.displayName} as: ${uploadResponse.file.uri}`);
-
-        // 2. Wait for the file to be active
-        let file = await fileManager.getFile(uploadResponse.file.name);
-        while (file.state === "PROCESSING") {
-            process.stdout.write(".");
-            await new Promise((resolve) => setTimeout(resolve, 2000)); // Sleep for 2 seconds
-            file = await fileManager.getFile(uploadResponse.file.name);
-        }
-        console.log(`\nFile processing complete: ${file.state}`);
-
-        if (file.state !== "ACTIVE") {
-            throw new Error(`File processing failed. State: ${file.state}`);
-        }
-
-        // 3. Generate Content
-        const model = genAI.getGenerativeModel({
-            model: "gemini-flash-latest",
-        });
-
-        const result = await model.generateContent([
-            {
-                fileData: {
-                    mimeType: file.mimeType,
-                    fileUri: file.uri
-                }
+        const scribeResponse = await axios.post('https://api.elevenlabs.io/v1/speech-to-text', form, {
+            headers: {
+                ...form.getHeaders(),
+                'xi-api-key': process.env.ELEVENLABS_API_KEY,
             },
-            { text: "Analyze this video for political bias. Determine: 1. A bias score (1-10, where 1 is strong left, 5 is center, 10 is strong right). 2. A bias label (e.g., 'Strong Left', 'Center-Right', etc.). 3. A list of key political terms or topics mentioned. 4. A brief transcription of the relevant speech. Return the result strictly as a JSON object with these keys: bias_score, bias_label, key_terms, transcription." }
-        ]);
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+        });
 
+        transcription = scribeResponse.data.text;
+        console.log('Transcription complete:', transcription.substring(0, 50) + '...');
+
+        if (!transcription || transcription.trim().length === 0) {
+            throw new Error('Transcription resulted in empty text.');
+        }
+
+        // --- STEP 2: GEMINI BIAS ANALYSIS ---
+        console.log('Analyzing bias with Gemini...');
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({
+            model: "gemini-1.5-flash", // Using 1.5 flash which is more reliable for text
+        });
+
+        const prompt = `Analyze the following transcript for political bias: "${transcription}"
+        
+        Determine:
+        1. A bias score (1-10, where 1 is strong left, 5 is center, 10 is strong right).
+        2. A bias label (e.g., 'Strong Left', 'Center-Right', etc.).
+        3. A list of key political terms or topics mentioned.
+        
+        Return the result strictly as a JSON object with these keys: bias_score, bias_label, key_terms. 
+        Note: The transcript provided is from a social media video.`;
+
+        const result = await model.generateContent(prompt);
         const text = result.response.text();
-        console.log('Gemini raw response:', text);
 
         // Extract JSON if wrapped in markdown
         const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -100,7 +111,7 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
         }
 
         const responseData = {
-            transcription: analysis.transcription || "No speech detected.",
+            transcription: transcription,
             bias_score: analysis.bias_score || 5,
             bias_label: analysis.bias_label || "Neutral",
             key_terms: analysis.key_terms || []
@@ -110,17 +121,19 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
         res.json(responseData);
 
     } catch (error) {
-        console.error('Error processing video:', error);
-        res.status(500).json({ error: 'Failed to analyze video.' });
+        console.error('Error during processing:', error.message);
+
+        // Log transcription for debugging even on failure
+        if (transcription) {
+            console.log('Transcription was:', transcription.substring(0, 100) + '...');
+        }
+
+        res.status(500).json({ error: 'Failed to analyze video. Check server logs.' });
     } finally {
-        // --- CLEANUP ---
-        // Delete the file after processing (success or fail)
+        // Cleanup temp file
         fs.unlink(filePath, (err) => {
-            if (err) {
-                console.error('Error deleting file:', filePath, err);
-            } else {
-                console.log('Successfully deleted temp file:', filePath);
-            }
+            if (err) console.error('Error deleting file:', filePath, err);
+            else console.log('Deleted temp file:', filePath);
         });
     }
 });
