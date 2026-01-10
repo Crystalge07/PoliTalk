@@ -141,7 +141,7 @@ export const BiasPopup = () => {
         </div>
 
         {/* Related News Dropdown */}
-        {displayData.related_articles && displayData.related_articles.length > 0 && (
+        {data && status !== 'error' && (
           <Collapsible open={newsOpen} onOpenChange={setNewsOpen}>
             <CollapsibleTrigger className="flex items-center justify-between w-full p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors group">
               <div className="flex items-center gap-2">
@@ -156,26 +156,34 @@ export const BiasPopup = () => {
               />
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-3 space-y-2 animate-fade-in">
-              {displayData.related_articles.map((article, i) => (
-                <a
-                  key={i}
-                  href={article.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-start gap-2 p-2 rounded-md bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group/link"
-                >
-                  <LinkIcon className="w-3 h-3 mt-1 text-primary shrink-0" />
-                  <div className="flex-1 space-y-0.5">
-                    <p className="text-xs font-medium text-foreground leading-snug group-hover/link:text-primary transition-colors">
-                      {article.title}
-                    </p>
-                    <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
-                      <span>{new URL(article.url).hostname.replace('www.', '')}</span>
-                      <ExternalLink className="w-2 h-2" />
+              {displayData.related_articles && displayData.related_articles.length > 0 ? (
+                displayData.related_articles.map((article, i) => (
+                  <a
+                    key={i}
+                    href={article.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start gap-2 p-2 rounded-md bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group/link"
+                  >
+                    <LinkIcon className="w-3 h-3 mt-1 text-primary shrink-0" />
+                    <div className="flex-1 space-y-0.5">
+                      <p className="text-xs font-medium text-foreground leading-snug group-hover/link:text-primary transition-colors">
+                        {article.title}
+                      </p>
+                      <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
+                        <span>{new URL(article.url).hostname.replace('www.', '')}</span>
+                        <ExternalLink className="w-2 h-2" />
+                      </div>
                     </div>
-                  </div>
-                </a>
-              ))}
+                  </a>
+                ))
+              ) : (
+                <div className="p-3 rounded-lg bg-secondary/20 border border-white/5 text-center">
+                  <p className="text-xs text-muted-foreground italic">
+                    Not enough context provided in this video to match reliable news articles.
+                  </p>
+                </div>
+              )}
             </CollapsibleContent>
           </Collapsible>
         )}

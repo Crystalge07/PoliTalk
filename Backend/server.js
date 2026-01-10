@@ -116,26 +116,39 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
         - bias_score (1-10)
         - bias_label (short string like 'Center-Left', 'Strong Right')
         - key_terms (MUST include 3-5 keywords if political)
-        - related_articles (ONLY provide this if the transcript refers to a specific, identifiable news event or documented political fact. If the transcript is vague, highly generalized, or lacks specific context, return an empty array []. If providing articles, find exactly 3 from BBC, Reuters, New York Times, or Forbes with 'title' and 'url'.)
+        - related_articles (STRICT: ONLY provide this if the transcript contains at least 15-20 words AND refers to specific proper nouns like names, locations, or clear verifiable events. If the transcript is vague, lacks specific names, or is too short, return an empty array []. Do not guess. If providing articles, find exactly 3 from BBC, Reuters, New York Times, or Forbes.)
         
         Response must be valid JSON only.`;
-
 
         const result = await model.generateContent(prompt);
         const text = result.response.text();
 
-        let analysis;
+        let analysis = null;
         try {
+            // Attempt clean parse
             analysis = JSON.parse(text);
         } catch (e) {
-            console.error('Failed to parse Gemini JSON:', text);
-            // Fallback: search for JSON-like block
+            console.log('Attempting regex extraction for JSON...');
             const jsonMatch = text.match(/\{[\s\S]*\}/);
-            analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+            if (jsonMatch) {
+                try {
+                    analysis = JSON.parse(jsonMatch[0]);
+                } catch (innerE) {
+                    console.error('Regex extraction failed to parse.');
+                }
+            }
         }
 
+        // --- STEP 3: CONSTRUCT RESPONSE ---
+        // If analysis failed entirely, provide a safe fallback
         if (!analysis) {
-            throw new Error('Could not get valid JSON from Gemini');
+            console.log('Using safe fallback for analysis.');
+            analysis = {
+                bias_score: 5,
+                bias_label: "Non-Political / Neutral",
+                key_terms: [],
+                related_articles: []
+            };
         }
 
         const responseData = {
