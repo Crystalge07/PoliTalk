@@ -83,10 +83,10 @@ export const BiasPopup = () => {
         <img
           src={(window as any).chrome?.runtime?.getURL('logo.png') || '/logo.png'}
           alt="Logo"
-          className="w-8 h-8 rounded-md object-contain"
+          className="w-8 h-8 object-contain"
         />
         <div className="flex flex-col">
-          <span className="text-[10px] font-bold text-foreground">POLITOK</span>
+          <span className="text-[11px] font-bold text-foreground">PoliTalk</span>
           <span className="text-[8px] text-muted-foreground uppercase">{statusLabel}</span>
         </div>
         <Eye className="w-3.5 h-3.5 text-muted-foreground ml-1" />
@@ -102,15 +102,15 @@ export const BiasPopup = () => {
           <img
             src={(window as any).chrome?.runtime?.getURL('logo.png') || '/logo.png'}
             alt="Logo"
-            className="w-10 h-10 rounded-lg object-contain"
+            className="w-10 h-10 object-contain"
           />
           <div>
-            <h1 className="text-sm font-bold text-foreground tracking-tight">PoliTok Analysis</h1>
+            <h1 className="text-lg font-bold text-foreground tracking-tight mb-0.5">PoliTalk</h1>
             <div className="flex items-center gap-1.5">
               {status === 'analyzing' || status === 'recording' ? (
                 <Loader2 className="w-2.5 h-2.5 animate-spin text-primary" />
               ) : (
-                <div className={cn("w-1.5 h-1.5 rounded-full",
+                <div className={cn("w-1.5 h-1.5",
                   status === 'idle' ? "bg-green-500" : "bg-muted-foreground"
                 )} />
               )}
@@ -120,7 +120,7 @@ export const BiasPopup = () => {
         </div>
         <button
           onClick={() => setIsExpanded(false)}
-          className="p-1.5 rounded-md hover:bg-secondary transition-colors"
+          className="p-1.5 hover:bg-secondary transition-colors"
         >
           <EyeOff className="w-4 h-4 text-muted-foreground" />
         </button>
@@ -136,16 +136,15 @@ export const BiasPopup = () => {
         </div>
 
         {/* Status */}
-        <div className="text-center p-3 rounded-lg bg-secondary/30 border border-white/5">
+        <div className="text-center p-3 bg-secondary/30 border border-white/5">
           <p className="text-lg font-bold tracking-tight text-foreground">{displayData.bias_label}</p>
         </div>
 
         {/* Related News Dropdown */}
         {data && status !== 'error' && (
           <Collapsible open={newsOpen} onOpenChange={setNewsOpen}>
-            <CollapsibleTrigger className="flex items-center justify-between w-full p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors group">
+            <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-secondary/50 hover:bg-secondary transition-colors group">
               <div className="flex items-center gap-2">
-                <Newspaper className="w-3.5 h-3.5 text-muted-foreground" />
                 <span className="text-sm font-medium text-foreground">Related News Articles</span>
               </div>
               <ChevronDown
@@ -163,7 +162,7 @@ export const BiasPopup = () => {
                     href={article.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-start gap-2 p-2 rounded-md bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group/link"
+                    className="flex items-start gap-2 p-2 bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group/link"
                   >
                     <LinkIcon className="w-3 h-3 mt-1 text-primary shrink-0" />
                     <div className="flex-1 space-y-0.5">
@@ -178,7 +177,7 @@ export const BiasPopup = () => {
                   </a>
                 ))
               ) : (
-                <div className="p-3 rounded-lg bg-secondary/20 border border-white/5 text-center">
+                <div className="p-3 bg-secondary/20 border border-white/5 text-center">
                   <p className="text-xs text-muted-foreground italic">
                     {displayData.bias_label.includes('Non-Political')
                       ? "No news articles available for non-political content."
@@ -193,9 +192,8 @@ export const BiasPopup = () => {
         {/* Keywords Dropdown */}
         {displayData.key_terms.length > 0 && (
           <Collapsible open={keywordsOpen} onOpenChange={setKeywordsOpen}>
-            <CollapsibleTrigger className="flex items-center justify-between w-full p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors group">
+            <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-secondary/50 hover:bg-secondary transition-colors group">
               <div className="flex items-center gap-2">
-                <Scale className="w-3.5 h-3.5 text-muted-foreground" />
                 <span className="text-sm font-medium text-foreground">Key Indicative Terms</span>
               </div>
               <ChevronDown
@@ -214,9 +212,8 @@ export const BiasPopup = () => {
         {/* Transcription Dropdown */}
         {displayData.transcription && status !== 'error' && (
           <Collapsible open={transcriptionOpen} onOpenChange={setTranscriptionOpen}>
-            <CollapsibleTrigger className="flex items-center justify-between w-full p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors group">
+            <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-secondary/50 hover:bg-secondary transition-colors group">
               <div className="flex items-center gap-2">
-                <Eye className="w-3.5 h-3.5 text-muted-foreground" />
                 <span className="text-sm font-medium text-foreground">Video Transcription</span>
               </div>
               <ChevronDown
@@ -227,7 +224,7 @@ export const BiasPopup = () => {
               />
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-3 animate-fade-in">
-              <div className="p-3 rounded-lg bg-secondary/20 border border-white/5 max-h-[120px] overflow-y-auto">
+              <div className="p-3 bg-secondary/20 border border-white/5 max-h-[120px] overflow-y-auto">
                 <p className="text-xs text-foreground italic leading-relaxed">"{displayData.transcription}"</p>
               </div>
             </CollapsibleContent>
@@ -236,7 +233,7 @@ export const BiasPopup = () => {
 
         {/* Error Details */}
         {status === 'error' && errorDetails && (
-          <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 max-h-[100px] overflow-y-auto">
+          <div className="p-3 bg-destructive/10 border border-destructive/20 max-h-[100px] overflow-y-auto">
             <p className="text-[10px] uppercase tracking-wider text-destructive mb-1 font-bold">Error Details</p>
             <p className="text-xs text-foreground italic leading-relaxed">{errorDetails}</p>
           </div>

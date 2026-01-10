@@ -32,7 +32,7 @@ export const BiasIndicator = ({ level, confidence }: BiasIndicatorProps) => {
     <div className="flex items-center gap-3 animate-slide-up">
       <div
         className={cn(
-          "px-3 py-1.5 rounded-lg font-semibold text-sm",
+          "px-3 py-1.5 font-semibold text-sm",
           getBiasColorClass(),
           getGlowClass()
         )}
@@ -40,9 +40,9 @@ export const BiasIndicator = ({ level, confidence }: BiasIndicatorProps) => {
         {BIAS_LABELS[level]}
       </div>
       <div className="flex items-center gap-1.5">
-        <div className="h-1.5 w-16 bg-secondary rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-foreground/60 rounded-full transition-all duration-500"
+        <div className="h-1.5 w-16 bg-secondary overflow-hidden">
+          <div
+            className="h-full bg-foreground/60 transition-all duration-500"
             style={{ width: `${confidence}%` }}
           />
         </div>
