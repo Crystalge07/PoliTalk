@@ -36,27 +36,29 @@
     --input: 0 0% 18%;
     --ring: 0 0% 40%;
 
-    --radius: 0.75rem;
+    --radius: 0;
 
     /* Political Spectrum Colors */
-    --bias-strong-left: 221 83% 53%;
-    --bias-left: 221 70% 60%;
+    --bias-strong-left: 217 63% 31%;
+    /* #1e4482 */
+    --bias-left: 217 40% 50%;
     --bias-center: 0 0% 50%;
-    --bias-right: 0 70% 55%;
-    --bias-strong-right: 0 84% 60%;
+    --bias-right: 354 50% 55%;
+    --bias-strong-right: 354 100% 40%;
+    /* #ca0013 */
 
-    /* Gradient for spectrum bar */
+    /* Solid Gradient for spectrum bar */
     --spectrum-gradient: linear-gradient(to right,
-        hsl(221, 83%, 53%),
-        hsl(221, 70%, 60%),
-        hsl(0, 0%, 50%),
-        hsl(0, 70%, 55%),
-        hsl(0, 84%, 60%));
+        #1e4482 0%, #1e4482 20%,
+        #5a7bb0 20%, #5a7bb0 40%,
+        #808080 40%, #808080 60%,
+        #e06672 60%, #e06672 80%,
+        #ca0013 80%, #ca0013 100%);
 
-    /* Glow effects */
-    --glow-left: 0 0 20px hsla(221, 83%, 53%, 0.4);
-    --glow-right: 0 0 20px hsla(0, 84%, 60%, 0.4);
-    --glow-center: 0 0 20px hsla(0, 0%, 50%, 0.3);
+    /* Glow effects - toned down for solid look */
+    --glow-left: 0 0 10px rgba(30, 68, 130, 0.3);
+    --glow-right: 0 0 10px rgba(202, 0, 19, 0.3);
+    --glow-center: 0 0 10px rgba(128, 128, 128, 0.2);
 
     /* Glass effect */
     --glass-bg: hsla(0, 0%, 12%, 0.8);
@@ -91,7 +93,7 @@
 
 @layer components {
   .glass-panel {
-    @apply backdrop-blur-xl border rounded-xl;
+    @apply backdrop-blur-xl border rounded-none;
     background: var(--glass-bg);
     border-color: var(--glass-border);
   }
