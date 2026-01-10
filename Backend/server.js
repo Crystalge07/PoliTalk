@@ -63,7 +63,7 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
 
         const form = new FormData();
         form.append('file', fs.createReadStream(filePath));
-        form.append('model_id', 'scribe_v1');
+        form.append('model_id', 'scribe_v2');
         // form.append('tag', 'politok'); // Optional
 
         const scribeResponse = await axios.post('https://api.elevenlabs.io/v1/speech-to-text', form, {
@@ -86,7 +86,7 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
         console.log('Analyzing bias with Gemini...');
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({
-            model: "gemini-1.5-flash", // Using 1.5 flash which is more reliable for text
+            model: "gemini-2.0-flash-exp",
         });
 
         const prompt = `Analyze the following transcript for political bias: "${transcription}"
@@ -121,14 +121,28 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
         res.json(responseData);
 
     } catch (error) {
-        console.error('Error during processing:', error.message);
-
-        // Log transcription for debugging even on failure
-        if (transcription) {
-            console.log('Transcription was:', transcription.substring(0, 100) + '...');
+        console.error('Processing Error:');
+        if (error.response) {
+            console.error('Status:', error.response.status);
+            console.error('Data:', JSON.stringify(error.response.data));
+        } else {
+            console.error('Message:', error.message);
         }
 
-        res.status(500).json({ error: 'Failed to analyze video. Check server logs.' });
+        let label = "Analysis Error";
+        let message = error.message;
+
+        if (error.response && error.response.data) {
+            message = JSON.stringify(error.response.data);
+        }
+
+        res.status(error.response?.status || 500).json({
+            bias_score: 5,
+            bias_label: label,
+            key_terms: ["System Error"],
+            transcription: "An error occurred during processing.",
+            error_details: message
+        });
     } finally {
         // Cleanup temp file
         fs.unlink(filePath, (err) => {
