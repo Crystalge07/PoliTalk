@@ -24,7 +24,7 @@ interface BiasData {
 const mapScoreToLevel = (score: number): BiasLevel => {
   if (score <= 2) return 'strong-left';
   if (score <= 4) return 'left';
-  if (score <= 6) return 'center';
+  if (score === 5) return 'center';
   if (score <= 8) return 'right';
   return 'strong-right';
 };
@@ -180,7 +180,9 @@ export const BiasPopup = () => {
               ) : (
                 <div className="p-3 rounded-lg bg-secondary/20 border border-white/5 text-center">
                   <p className="text-xs text-muted-foreground italic">
-                    Not enough context provided in this video to match reliable news articles.
+                    {displayData.bias_label.includes('Non-Political')
+                      ? "No news articles available for non-political content."
+                      : "Not enough context provided in this video to match reliable news articles."}
                   </p>
                 </div>
               )}
