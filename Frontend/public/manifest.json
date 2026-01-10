@@ -8,7 +8,17 @@
     "scripting"
   ],
   "action": {
-    "default_popup": "index.html"
+    "default_popup": "index.html",
+    "default_icon": {
+      "16": "logo.png",
+      "48": "logo.png",
+      "128": "logo.png"
+    }
+  },
+  "icons": {
+    "16": "logo.png",
+    "48": "logo.png",
+    "128": "logo.png"
   },
   "content_scripts": [
     {
@@ -16,14 +26,17 @@
         "*://www.tiktok.com/*"
       ],
       "js": [
-        "content.js"
+        "loader.js"
       ]
     }
   ],
   "web_accessible_resources": [
     {
       "resources": [
-        "sidebar.css"
+        "content.js",
+        "assets/*",
+        "sidebar.css",
+        "logo.png"
       ],
       "matches": [
         "*://www.tiktok.com/*"

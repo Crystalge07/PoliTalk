@@ -22,10 +22,12 @@ export const BiasPopup = () => {
   if (!isExpanded) {
     return (
       <div className="fixed bottom-4 left-4 glass-panel p-2 flex items-center gap-2 cursor-pointer hover:bg-secondary/50 transition-colors"
-           onClick={() => setIsExpanded(true)}>
-        <div className="w-6 h-6 rounded-md bg-gradient-to-br from-bias-left to-bias-right flex items-center justify-center">
-          <Scale className="w-3 h-3 text-white" />
-        </div>
+        onClick={() => setIsExpanded(true)}>
+        <img
+          src={(window as any).chrome?.runtime?.getURL('logo.png') || '/logo.png'}
+          alt="Logo"
+          className="w-8 h-8 rounded-md object-contain"
+        />
         <span className="text-xs font-medium text-foreground">Bias</span>
         <Eye className="w-3.5 h-3.5 text-muted-foreground ml-1" />
       </div>
@@ -37,9 +39,11 @@ export const BiasPopup = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-bias-left to-bias-right flex items-center justify-center">
-            <Scale className="w-4 h-4 text-white" />
-          </div>
+          <img
+            src={(window as any).chrome?.runtime?.getURL('logo.png') || '/logo.png'}
+            alt="Logo"
+            className="w-10 h-10 rounded-lg object-contain"
+          />
           <div>
             <h1 className="text-sm font-semibold text-foreground">Bias Detector</h1>
             <p className="text-[10px] text-muted-foreground">TikTok Political Analysis</p>
@@ -55,8 +59,8 @@ export const BiasPopup = () => {
 
       <div className="space-y-4 animate-fade-in">
         {/* Spectrum */}
-        <BiasSpectrum 
-          level={null} 
+        <BiasSpectrum
+          level={null}
           isAnimating={false}
         />
 
@@ -64,11 +68,11 @@ export const BiasPopup = () => {
         <Collapsible open={keywordsOpen} onOpenChange={setKeywordsOpen}>
           <CollapsibleTrigger className="flex items-center justify-between w-full p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors">
             <span className="text-sm font-medium text-foreground">Keywords that indicate bias</span>
-            <ChevronDown 
+            <ChevronDown
               className={cn(
                 "w-4 h-4 text-muted-foreground transition-transform duration-200",
                 keywordsOpen && "rotate-180"
-              )} 
+              )}
             />
           </CollapsibleTrigger>
           <CollapsibleContent className="pt-3 space-y-3 animate-fade-in">
