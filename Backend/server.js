@@ -94,25 +94,32 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
         const model = genAI.getGenerativeModel({
             model: "gemini-2.0-flash-exp",
             generationConfig: {
-                responseMimeType: "application/json",
-            }
+                // JSON Mode cannot be used with Google Search Grounding
+            },
+            tools: [
+                {
+                    googleSearch: {},
+                },
+            ],
         });
 
-        const prompt = `Analyze the political bias of this transcript from a social media video: "${transcription}"
+        const prompt = `Analyze the political bias of this transcript from a social media video and find related real-world news: "${transcription}"
         
-        IMPORTANT: First, determine if the transcript contains any political or social-issue content. If it is purely entertainment, music, personal vlog, or otherwise non-political, set the bias_label to 'Non-Political', the bias_score to 5, and key_terms to an empty array.
+        IMPORTANT: First, determine if the transcript contains any political or social-issue content. If it is purely entertainment, music, personal vlog, or otherwise non-political, set the bias_label to 'Non-Political', the bias_score to 5, and key_terms/related_articles to empty arrays.
 
         Bias Spectrum Reference:
-        - 1-4 (Left/Progressive): Focus on social progress, systemic change, secularism, environmentalism, collective welfare, or progressive social justice.
+        - 1-4 (Left/Progressive): Focus on social progress, systemic change, secularism, collective welfare, or progressive social justice.
         - 5 (Center/Neutral): Balanced, objective reporting, or non-partisan issues.
-        - 6-10 (Right/Conservative): Focus on traditional values (e.g., traditional family roles, religious values), individual liberty, free markets, nationalism, or conservative social views.
+        - 6-10 (Right/Conservative): Focus on traditional values, individual liberty, free markets, nationalism, or conservative social views.
 
         Based on the transcript, return a JSON object with:
         - bias_score (1-10)
         - bias_label (short string like 'Center-Left', 'Strong Right')
-        - key_terms (MUST include at least 3-5 keywords if political, e.g., ['Traditionalism', 'Role of Women', 'Propaganda'])
+        - key_terms (MUST include 3-5 keywords if political)
+        - related_articles (ONLY provide this if the transcript refers to a specific, identifiable news event or documented political fact. If the transcript is vague, highly generalized, or lacks specific context, return an empty array []. If providing articles, find exactly 3 from BBC, Reuters, New York Times, or Forbes with 'title' and 'url'.)
         
         Response must be valid JSON only.`;
+
 
         const result = await model.generateContent(prompt);
         const text = result.response.text();
@@ -133,9 +140,11 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
 
         const responseData = {
             transcription: transcription,
+            topic: analysis.topic || "General Political Discussion",
             bias_score: analysis.bias_score || 5,
             bias_label: analysis.bias_label || "Neutral",
-            key_terms: analysis.key_terms || []
+            key_terms: analysis.key_terms || [],
+            related_articles: analysis.related_articles || []
         };
 
         console.log('Analysis complete:', responseData.bias_label);
