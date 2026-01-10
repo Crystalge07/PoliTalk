@@ -157,26 +157,45 @@ export const BiasPopup = () => {
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-3 space-y-2 animate-fade-in">
               {displayData.related_articles && displayData.related_articles.length > 0 ? (
-                displayData.related_articles.map((article, i) => (
-                  <a
-                    key={i}
-                    href={article.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-start gap-2 p-2 rounded-md bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group/link"
-                  >
-                    <LinkIcon className="w-3 h-3 mt-1 text-primary shrink-0" />
-                    <div className="flex-1 space-y-0.5">
-                      <p className="text-xs font-medium text-foreground leading-snug group-hover/link:text-primary transition-colors">
-                        {article.title}
-                      </p>
-                      <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
-                        <span>{new URL(article.url).hostname.replace('www.', '')}</span>
-                        <ExternalLink className="w-2 h-2" />
-                      </div>
-                    </div>
-                  </a>
-                ))
+                displayData.related_articles
+                  .filter(article => {
+                    try {
+                      new URL(article.url);
+                      return true;
+                    } catch {
+                      console.warn('PoliTok: Invalid URL filtered:', article.url);
+                      return false;
+                    }
+                  })
+                  .map((article, i) => {
+                    let hostname = 'Unknown Source';
+                    try {
+                      hostname = new URL(article.url).hostname.replace('www.', '');
+                    } catch (e) {
+                      console.error('PoliTok: URL parse error:', e);
+                    }
+
+                    return (
+                      <a
+                        key={i}
+                        href={article.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-start gap-2 p-2 rounded-md bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group/link"
+                      >
+                        <LinkIcon className="w-3 h-3 mt-1 text-primary shrink-0" />
+                        <div className="flex-1 space-y-0.5">
+                          <p className="text-xs font-medium text-foreground leading-snug group-hover/link:text-primary transition-colors">
+                            {article.title}
+                          </p>
+                          <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
+                            <span>{hostname}</span>
+                            <ExternalLink className="w-2 h-2" />
+                          </div>
+                        </div>
+                      </a>
+                    );
+                  })
               ) : (
                 <div className="p-3 rounded-lg bg-secondary/20 border border-white/5 text-center">
                   <p className="text-xs text-muted-foreground italic">
