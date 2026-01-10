@@ -1,0 +1,143 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    --background: 0 0% 6%;
+    --foreground: 0 0% 98%;
+
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 6%;
+
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 64%;
+
+    --accent: 0 0% 14%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 0 0% 40%;
+
+    --radius: 0.75rem;
+
+    /* Political Spectrum Colors */
+    --bias-strong-left: 221 83% 53%;
+    --bias-left: 221 70% 60%;
+    --bias-center: 0 0% 50%;
+    --bias-right: 0 70% 55%;
+    --bias-strong-right: 0 84% 60%;
+
+    /* Gradient for spectrum bar */
+    --spectrum-gradient: linear-gradient(
+      to right,
+      hsl(221, 83%, 53%),
+      hsl(221, 70%, 60%),
+      hsl(0, 0%, 50%),
+      hsl(0, 70%, 55%),
+      hsl(0, 84%, 60%)
+    );
+
+    /* Glow effects */
+    --glow-left: 0 0 20px hsla(221, 83%, 53%, 0.4);
+    --glow-right: 0 0 20px hsla(0, 84%, 60%, 0.4);
+    --glow-center: 0 0 20px hsla(0, 0%, 50%, 0.3);
+
+    /* Glass effect */
+    --glass-bg: hsla(0, 0%, 12%, 0.8);
+    --glass-border: hsla(0, 0%, 100%, 0.08);
+  }
+
+  .dark {
+    --background: 0 0% 6%;
+    --foreground: 0 0% 98%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'DM Sans', system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply backdrop-blur-xl border rounded-xl;
+    background: var(--glass-bg);
+    border-color: var(--glass-border);
+  }
+
+  .spectrum-bar {
+    background: var(--spectrum-gradient);
+  }
+
+  .bias-indicator {
+    @apply transition-all duration-500 ease-out;
+  }
+
+  .bias-glow-left {
+    box-shadow: var(--glow-left);
+  }
+
+  .bias-glow-right {
+    box-shadow: var(--glow-right);
+  }
+
+  .bias-glow-center {
+    box-shadow: var(--glow-center);
+  }
+}
+
+@layer utilities {
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.4s ease-out;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
