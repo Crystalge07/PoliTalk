@@ -8,7 +8,9 @@
     "scripting"
   ],
   "host_permissions": [
-    "http://localhost:3000/*"
+    "http://localhost:3000/*",
+    "*://www.instagram.com/*",
+    "*://www.youtube.com/*"
   ],
   "action": {
     "default_popup": "index.html",
@@ -26,7 +28,9 @@
   "content_scripts": [
     {
       "matches": [
-        "*://www.tiktok.com/*"
+        "*://www.tiktok.com/*",
+        "*://www.instagram.com/*",
+        "*://www.youtube.com/*"
       ],
       "js": [
         "loader.js"
@@ -42,7 +46,9 @@
         "logo.png"
       ],
       "matches": [
-        "*://www.tiktok.com/*"
+        "*://www.tiktok.com/*",
+        "*://www.instagram.com/*",
+        "*://www.youtube.com/*"
       ]
     }
   ]
