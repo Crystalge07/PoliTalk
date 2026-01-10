@@ -128,14 +128,6 @@ export const BiasPopup = () => {
           <span className="text-lg font-bold tracking-tight">{displayData.bias_label}</span>
         </div>
 
-        {/* Transcription */}
-        {displayData.transcription && (
-          <div className="p-3 rounded-lg bg-secondary/20 border border-white/5 max-h-[100px] overflow-y-auto">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">Transcription</p>
-            <p className="text-xs text-foreground italic leading-relaxed">"{displayData.transcription}"</p>
-          </div>
-        )}
-
         {/* Keywords Dropdown */}
         {displayData.key_terms.length > 0 && (
           <Collapsible open={keywordsOpen} onOpenChange={setKeywordsOpen}>
