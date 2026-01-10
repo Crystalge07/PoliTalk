@@ -2,7 +2,7 @@ import { BiasPopup } from '@/components/BiasPopup';
 
 const Index = () => {
   return (
-    <div className="min-w-[340px] bg-background">
+    <div className="w-[350px] bg-background border rounded-lg shadow-xl overflow-hidden">
       <BiasPopup />
     </div>
   );
