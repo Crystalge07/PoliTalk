@@ -21,7 +21,7 @@ const injectExtension = () => {
     }
 
     if (!container) {
-        console.log('PoliTok: Injecting...');
+        console.log('PoliTok: Injecting extension...');
         container = document.createElement('div');
         container.id = CONTAINER_ID;
 
@@ -65,8 +65,7 @@ const injectExtension = () => {
 
 injectExtension();
 
-// Ultra-aggressive check (500ms)
-setInterval(injectExtension, 500);
+setInterval(injectExtension, 2000);
 
 // Watch for any removal of our container or changes to the root
 const observer = new MutationObserver(() => {
