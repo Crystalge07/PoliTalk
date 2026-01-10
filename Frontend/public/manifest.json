@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "TikTok Bias Detector",
+  "version": "1.0",
+  "description": "Detect political bias in TikTok videos.",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_popup": "index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://www.tiktok.com/*"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "sidebar.css"
+      ],
+      "matches": [
+        "*://www.tiktok.com/*"
+      ]
+    }
+  ]
+}
