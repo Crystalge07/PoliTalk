@@ -2,22 +2,45 @@
 let mediaRecorder: MediaRecorder | null = null;
 let recordedChunks: Blob[] = [];
 let isRecording = false;
+let isAnalyzing = false;
+let playStartTime = 0;
+const processedVideos = new Set<string>();
 
 // Function to find the main video element
 function findVideoElement(): HTMLVideoElement | null {
     const videos = document.querySelectorAll('video');
+    let bestVideo: HTMLVideoElement | null = null;
+    let maxVisibleHeight = 0;
+
     for (let video of Array.from(videos)) {
-        // Simple heuristic: video must be visible in viewport
         const rect = video.getBoundingClientRect();
-        const isVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
-        if (isVisible && (video.src || video.querySelector('source') || video.currentSrc)) {
-            return video;
+
+        // Calculate visible height in viewport
+        const visibleTop = Math.max(0, rect.top);
+        const visibleBottom = Math.min(window.innerHeight, rect.bottom);
+        const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+
+        if (visibleHeight > maxVisibleHeight && (video.src || video.currentSrc || video.querySelector('source'))) {
+            maxVisibleHeight = visibleHeight;
+            bestVideo = video;
         }
+    }
+
+    // Only return if at least 50% of the video is visible or it's the largest visible area
+    if (bestVideo && maxVisibleHeight > 100) {
+        return bestVideo;
     }
     return null;
 }
 
-async function sendVideoToBackend(blob: Blob, onResult: (data: any) => void, onError: () => void) {
+async function sendVideoToBackend(blob: Blob, onResult: (data: any) => void, onError: (details?: string) => void) {
+    if (blob.size === 0) {
+        console.error("PoliTok: Recorded blob is empty.");
+        onError("Empty recording");
+        return;
+    }
+    console.log(`PoliTok: Sending video blob of size: ${blob.size} bytes`);
+
     const formData = new FormData();
     formData.append('video', blob, 'recording.webm');
 
@@ -31,27 +54,38 @@ async function sendVideoToBackend(blob: Blob, onResult: (data: any) => void, onE
             const result = await response.json();
             onResult(result);
         } else {
-            console.error("PoliTok: Backend error:", response.statusText);
-            onError();
+            let details = response.statusText;
+            try {
+                const errorData = await response.json();
+                details = errorData.error_details || errorData.transcription || details;
+            } catch (e) { }
+            console.error("PoliTok: Backend error:", details);
+            onError(details);
         }
-    } catch (e) {
+    } catch (e: any) {
         console.error("PoliTok: Network error:", e);
-        onError();
+        onError(e.message);
     }
 }
 
 export function setupPoliTok(
-    onStatus: (status: string) => void,
+    onStatus: (status: string, details?: string) => void,
     onResult: (data: any) => void
 ) {
     const startRecording = (video: HTMLVideoElement) => {
-        if (isRecording) return;
+        if (isRecording || isAnalyzing) return;
+
+        const videoId = video.src || video.currentSrc || video.querySelector('source')?.getAttribute('src');
+        if (!videoId || processedVideos.has(videoId)) return;
+
+        // Reset buffer
+        recordedChunks = [];
+        processedVideos.add(videoId);
 
         try {
             // @ts-ignore
             const stream = video.captureStream();
             mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-            recordedChunks = [];
 
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
@@ -61,11 +95,16 @@ export function setupPoliTok(
 
             mediaRecorder.onstop = () => {
                 onStatus('analyzing');
+                isAnalyzing = true;
                 const blob = new Blob(recordedChunks, { type: 'video/webm' });
                 sendVideoToBackend(blob, (data) => {
                     onResult(data);
                     onStatus('idle');
-                }, () => onStatus('error'));
+                    isAnalyzing = false;
+                }, (details) => {
+                    onStatus('error', details);
+                    isAnalyzing = false;
+                });
                 isRecording = false;
             };
 
@@ -73,52 +112,61 @@ export function setupPoliTok(
             isRecording = true;
             onStatus('recording');
 
-        } catch (e) {
+        } catch (e: any) {
             console.error("PoliTok: Error starting recording:", e);
-            onStatus('error');
+            onStatus('error', e.message);
         }
     };
 
     const stopRecording = () => {
         if (isRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
             mediaRecorder.stop();
+            isRecording = false;
         }
     };
 
     const interval = setInterval(() => {
         const video = findVideoElement();
         if (video) {
+            // Check if we are already recording THIS specific video
+            const videoId = video.src || video.currentSrc || video.querySelector('source')?.getAttribute('src');
+
             if (!(video as any).dataset.politokAttached) {
                 (video as any).dataset.politokAttached = "true";
-
-                // Crucial for captureStream check
                 if (!video.crossOrigin) video.crossOrigin = "anonymous";
 
                 video.addEventListener('play', () => {
-                    if (!isRecording) startRecording(video);
+                    playStartTime = Date.now();
                 });
+            }
 
-                video.addEventListener('timeupdate', () => {
-                    if (isRecording && video.duration > 0) {
-                        const timeLeft = video.duration - video.currentTime;
-                        if (timeLeft <= 3.5 && timeLeft > 0.5) {
-                            stopRecording();
-                        }
-                    }
-                });
-
-                video.addEventListener('ended', () => {
-                    if (isRecording) stopRecording();
-                });
-
-                if (!video.paused && !isRecording) {
+            // Detection logic
+            if (!isRecording && !isAnalyzing && !processedVideos.has(videoId || '')) {
+                // Wait for video to be playing and visible
+                if (!video.paused && (Date.now() - playStartTime > 500)) {
                     startRecording(video);
                 }
             }
+
+            // Auto stop when video is near end
+            if (isRecording && video.duration > 0) {
+                const timeLeft = video.duration - video.currentTime;
+                if (timeLeft <= 2.0 && timeLeft > 0.5) {
+                    stopRecording();
+                }
+            }
+
+            // If we scroll away significantly, stop recording
+            const rect = video.getBoundingClientRect();
+            if (isRecording && (rect.bottom < 100 || rect.top > window.innerHeight - 100)) {
+                stopRecording();
+            }
+
         } else {
-            if (!isRecording) onStatus('no-video');
+            if (isRecording) stopRecording();
+            if (!isAnalyzing) onStatus('no-video');
         }
-    }, 1000);
+    }, 500);
 
     return () => clearInterval(interval);
 }

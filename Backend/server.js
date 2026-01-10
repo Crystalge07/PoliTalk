@@ -79,7 +79,13 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
         console.log('Transcription complete:', transcription.substring(0, 50) + '...');
 
         if (!transcription || transcription.trim().length === 0) {
-            throw new Error('Transcription resulted in empty text.');
+            console.log('No speech detected in audio.');
+            return res.json({
+                transcription: "No speech detected.",
+                bias_score: 5,
+                bias_label: "No Speech Detected",
+                key_terms: []
+            });
         }
 
         // --- STEP 2: GEMINI BIAS ANALYSIS ---
@@ -87,27 +93,42 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({
             model: "gemini-2.0-flash-exp",
+            generationConfig: {
+                responseMimeType: "application/json",
+            }
         });
 
-        const prompt = `Analyze the following transcript for political bias: "${transcription}"
+        const prompt = `Analyze the political bias of this transcript from a social media video: "${transcription}"
         
-        Determine:
-        1. A bias score (1-10, where 1 is strong left, 5 is center, 10 is strong right).
-        2. A bias label (e.g., 'Strong Left', 'Center-Right', etc.).
-        3. A list of key political terms or topics mentioned.
+        IMPORTANT: First, determine if the transcript contains any political or social-issue content. If it is purely entertainment, music, personal vlog, or otherwise non-political, set the bias_label to 'Non-Political', the bias_score to 5, and key_terms to an empty array.
+
+        Bias Spectrum Reference:
+        - 1-4 (Left/Progressive): Focus on social progress, systemic change, secularism, environmentalism, collective welfare, or progressive social justice.
+        - 5 (Center/Neutral): Balanced, objective reporting, or non-partisan issues.
+        - 6-10 (Right/Conservative): Focus on traditional values (e.g., traditional family roles, religious values), individual liberty, free markets, nationalism, or conservative social views.
+
+        Based on the transcript, return a JSON object with:
+        - bias_score (1-10)
+        - bias_label (short string like 'Center-Left', 'Strong Right')
+        - key_terms (array of political keywords or topics mentioned)
         
-        Return the result strictly as a JSON object with these keys: bias_score, bias_label, key_terms. 
-        Note: The transcript provided is from a social media video.`;
+        Response must be valid JSON only.`;
 
         const result = await model.generateContent(prompt);
         const text = result.response.text();
 
-        // Extract JSON if wrapped in markdown
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        const analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+        let analysis;
+        try {
+            analysis = JSON.parse(text);
+        } catch (e) {
+            console.error('Failed to parse Gemini JSON:', text);
+            // Fallback: search for JSON-like block
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+        }
 
         if (!analysis) {
-            throw new Error('Failed to parse Gemini response as JSON');
+            throw new Error('Could not get valid JSON from Gemini');
         }
 
         const responseData = {
