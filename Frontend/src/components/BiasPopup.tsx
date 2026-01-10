@@ -32,12 +32,17 @@ export const BiasPopup = () => {
   const [keywordsOpen, setKeywordsOpen] = useState(false);
   const [data, setData] = useState<BiasData | null>(null);
   const [status, setStatus] = useState<'idle' | 'recording' | 'analyzing' | 'error' | 'no-video'>('no-video');
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
 
   useEffect(() => {
     // Import dynamically to avoid SSR issues if any, though content script is client-only
     import('@/logic/recorder').then(({ setupPoliTok }) => {
       const cleanup = setupPoliTok(
-        (s: any) => setStatus(s),
+        (s: any, details?: string) => {
+          setStatus(s);
+          if (details) setErrorDetails(details);
+          else if (s !== 'error') setErrorDetails(null);
+        },
         (d: any) => {
           console.log('PoliTok UI: Result received', d);
           setData(d);
@@ -144,6 +149,20 @@ export const BiasPopup = () => {
               <KeywordTags keywords={displayData.key_terms} />
             </CollapsibleContent>
           </Collapsible>
+        )}
+        {/* Transcription or Error Details */}
+        {status === 'error' && errorDetails && (
+          <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 max-h-[100px] overflow-y-auto">
+            <p className="text-[10px] uppercase tracking-wider text-destructive mb-1 font-bold">Error Details</p>
+            <p className="text-xs text-foreground italic leading-relaxed">{errorDetails}</p>
+          </div>
+        )}
+
+        {displayData.transcription && status !== 'error' && (
+          <div className="p-3 rounded-lg bg-secondary/20 border border-white/5 max-h-[100px] overflow-y-auto">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">Transcription</p>
+            <p className="text-xs text-foreground italic leading-relaxed">"{displayData.transcription}"</p>
+          </div>
         )}
 
         {/* Footer */}
