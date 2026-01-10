@@ -19,16 +19,16 @@ export const BiasSpectrum = ({ level, isAnimating = false }: BiasSpectrumProps) 
   return (
     <div className="w-full space-y-2">
       {/* Spectrum Bar */}
-      <div className="relative h-3 rounded-full spectrum-bar overflow-hidden">
+      <div className="relative h-3 spectrum-bar overflow-hidden">
         {/* Indicator */}
         <div
           className={cn(
-            "absolute top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white border-2 border-background bias-indicator",
+            "absolute top-1/2 -translate-y-1/2 w-1.5 h-5 bg-white border border-background bias-indicator",
             getGlowClass(),
             isAnimating && "animate-pulse-slow"
           )}
           style={{ 
-            left: `calc(${position}% - 10px)`,
+            left: `calc(${position}% - 3px)`,
             transition: 'left 0.5s ease-out'
           }}
         />
