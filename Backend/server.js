@@ -83,12 +83,13 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
         console.log('Transcription complete:', transcription.substring(0, 50) + '...');
 
         if (!transcription || transcription.trim().length === 0) {
-            console.log('No speech detected in audio.');
+            console.log('No speech detected in audio - assuming non-political content (music/entertainment).');
             return res.json({
                 transcription: "No speech detected.",
                 bias_score: 5,
-                bias_label: "No Speech Detected",
-                key_terms: []
+                bias_label: "Non-Political",
+                key_terms: [],
+                related_articles: []
             });
         }
 
