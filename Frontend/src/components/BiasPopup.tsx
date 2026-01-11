@@ -73,7 +73,7 @@ export const BiasPopup = () => {
     'analyzing': 'Gemini is thinking...',
     'error': 'Analysis Error',
     'idle': 'Watching',
-    'no-video': 'No video found'
+    'no-video': 'Idle'
   }[status];
 
   if (!isExpanded) {

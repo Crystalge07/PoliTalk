@@ -4,6 +4,7 @@ let recordedChunks: Blob[] = [];
 let isRecording = false;
 let isAnalyzing = false;
 let playStartTime = 0;
+let recordingStartTime = 0;
 const processedVideos = new Set<string>();
 
 // Function to find the main video element
@@ -80,11 +81,20 @@ export function setupPoliTok(
 
         // Reset buffer
         recordedChunks = [];
-        processedVideos.add(videoId);
+        recordingStartTime = Date.now();
+        processedVideos.add(videoId || 'unknown-' + Date.now());
 
         try {
             // @ts-ignore
             const stream = video.captureStream();
+
+            // Validate that stream has tracks before creating MediaRecorder
+            if (!stream || stream.getTracks().length === 0) {
+                console.warn('PoliTok: No tracks available in stream, skipping recording');
+                processedVideos.delete(videoId || '');
+                return;
+            }
+
             mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
 
             mediaRecorder.ondataavailable = (event) => {
@@ -113,8 +123,10 @@ export function setupPoliTok(
             onStatus('recording');
 
         } catch (e: any) {
-            console.error("PoliTok: Error starting recording:", e);
-            onStatus('error', e.message);
+            console.warn('PoliTok: Could not start recording (likely not on a video page):', e.message);
+            processedVideos.delete(videoId || '');
+            isRecording = false;
+            // Don't show error to user - this is expected when navigating away from videos
         }
     };
 
@@ -140,11 +152,16 @@ export function setupPoliTok(
                 });
             }
 
-            // Detection logic
+            // Detection logic - only on actual video pages
             if (!isRecording && !isAnalyzing && !processedVideos.has(videoId || '')) {
-                // Wait for video to be playing and visible
-                if (!video.paused && (Date.now() - playStartTime > 500)) {
+                // Check if we're on an actual video page (not profile, search, etc.)
+                const isVideoPage = window.location.pathname.includes('/video/');
+
+                if (isVideoPage && !video.paused && (Date.now() - playStartTime > 500)) {
                     startRecording(video);
+                } else if (!isVideoPage) {
+                    // On non-video page, show idle/waiting status
+                    onStatus('no-video');
                 }
             }
 
