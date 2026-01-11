@@ -110,17 +110,19 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
 
         const prompt = `Analyze the political bias of this transcript from a social media video and find related real-world news: "${transcription}"
         
-        IMPORTANT: First, determine if the transcript contains any political or social-issue content. If it is purely entertainment, music, personal vlog, or otherwise non-political, set the bias_label to 'Non-Political', the bias_score to 5, and key_terms/related_articles to empty arrays.
+        CRITICAL: First determine if the content is POLITICAL or NON-POLITICAL:
+        - NON-POLITICAL: Only for purely entertainment, music, personal vlogs, cooking, travel, lifestyle, or content with NO political/social commentary. These should have bias_label: 'Non-Political', bias_score: 5, and empty key_terms/related_articles.
+        - POLITICAL: Any content discussing politics, government, social issues, elections, policies, current events, or political figures. Even if neutral/balanced, this is POLITICAL content and should use the bias spectrum below.
 
-        Bias Spectrum Reference:
+        Bias Spectrum (ONLY for POLITICAL content):
         - 1-4 (Left/Progressive): Focus on social progress, systemic change, secularism, collective welfare, or progressive social justice.
-        - 5 (Center/Neutral): Balanced, objective reporting, or non-partisan issues.
+        - 5 (Center/Neutral): Balanced, objective political reporting, or non-partisan political issues. Use labels like 'Center', 'Neutral', 'Moderate', NOT 'Non-Political'.
         - 6-10 (Right/Conservative): Focus on traditional values, individual liberty, free markets, nationalism, or conservative social views.
 
         Based on the transcript, return a JSON object with:
-        - bias_score (1-10)
-        - bias_label (short string like 'Center-Left', 'Strong Right')
-        - key_terms (MUST include 3-5 keywords if political)
+        - bias_score (1-10) - For political content, use 1-10. For non-political, use 5.
+        - bias_label (short string like 'Center-Left', 'Strong Right', 'Center', or 'Non-Political')
+        - key_terms (MUST include 3-5 keywords if political content, empty array if non-political)
         - related_articles (CRITICAL RULES: 
             1. Provide articles if EITHER:
                a) The transcript discusses a SPECIFIC event with proper nouns (names, locations, dates), OR
