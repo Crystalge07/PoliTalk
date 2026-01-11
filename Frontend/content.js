@@ -5,17 +5,6 @@ let recordedChunks = [];
 let isRecording = false;
 let lastResult = null;
 
-// Function to find the main video element
-function findVideoElement() {
-    const videos = document.querySelectorAll('video');
-    for (let video of videos) {
-        if (video.src || video.querySelector('source')) {
-            return video;
-        }
-    }
-    return null;
-}
-
 // Function to start recording
 function startRecording(video) {
     if (isRecording) return;
@@ -145,6 +134,27 @@ function removeOverlay() {
     if (existingOverlay) existingOverlay.remove();
 }
 
+// --- Multi-Platform Video Detection ---
+
+function getPlatformVideos() {
+    // TikTok: all videos
+    const tiktokVideos = Array.from(document.querySelectorAll('video'));
+
+    // Instagram: reels and profile videos
+    const instaVideos = Array.from(document.querySelectorAll('video[src*="instagram"], div[role="presentation"] video'));
+
+    // YouTube Shorts: shorts and profile videos
+    const ytVideos = Array.from(document.querySelectorAll('ytd-reel-video-renderer video, ytd-shorts-player video, video[src*="youtube"]'));
+
+    // Combine and deduplicate
+    return [...new Set([...tiktokVideos, ...instaVideos, ...ytVideos])];
+}
+
+function observeAllVideos(observer) {
+    const videos = getPlatformVideos();
+    videos.forEach(v => observer.observe(v));
+}
+
 // --- Main Observer Logic ---
 
 let currentObserver = null;
@@ -182,27 +192,11 @@ function setupObserver() {
 
     observeAllVideos(observer);
 
-    const domObserver = new MutationObserver((mutations) => {
-        mutations.forEach(mutation => {
-            mutation.addedNodes.forEach(node => {
-                if (node.nodeType === 1) {
-                    if (node.tagName === 'VIDEO') {
-                        observer.observe(node);
-                    } else {
-                        const videos = node.querySelectorAll('video');
-                        videos.forEach(v => observer.observe(v));
-                    }
-                }
-            });
-        });
+    const domObserver = new MutationObserver(() => {
+        observeAllVideos(observer);
     });
 
     domObserver.observe(document.body, { childList: true, subtree: true });
-}
-
-function observeAllVideos(observer) {
-    const videos = document.querySelectorAll('video');
-    videos.forEach(v => observer.observe(v));
 }
 
 function handleNewVideo(video) {
@@ -260,3 +254,4 @@ const overlayObserver = new MutationObserver(() => {
 overlayObserver.observe(document.body, { childList: true, subtree: true });
 
 // Start
+setupObserver();

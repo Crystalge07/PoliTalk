@@ -23,7 +23,11 @@ if (process.env.ELEVENLABS_API_KEY) {
 }
 
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin: '*', // Allow all origins (including browser extensions)
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
 // Ensure uploads directory exists
