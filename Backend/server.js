@@ -116,7 +116,15 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
         - bias_score (1-10)
         - bias_label (short string like 'Center-Left', 'Strong Right')
         - key_terms (MUST include 3-5 keywords if political)
-        - related_articles (STRICT: ONLY provide this if the transcript contains at least 15-20 words AND refers to specific proper nouns like names, locations, or clear verifiable events. If the transcript is vague, lacks specific names, or is too short, return an empty array []. Do not guess. If providing articles, find exactly 3 from BBC, Reuters, New York Times, or Forbes.)
+        - related_articles (CRITICAL RULES: 
+            1. Provide articles if EITHER:
+               a) The transcript discusses a SPECIFIC event with proper nouns (names, locations, dates), OR
+               b) The transcript discusses a politically-charged topic (AI regulation, climate change, immigration, healthcare, gun control, etc.) with substantive commentary
+            2. DO NOT provide articles for purely generic statements like "politics is crazy" or "things are changing"
+            3. Articles MUST be directly related to the exact topic discussed - NO tangentially related articles
+            4. It is ALWAYS better to return an empty array [] than to provide unrelated or loosely connected articles
+            5. If providing articles, find exactly 3 from ONLY these trusted sources: Reuters, Associated Press, The Canadian Press, PBS NewsHour, NPR, Toronto Star, CBC, CPAC, BBC, Forbes, The Hill, MarketWatch, Morning Brew, Newsweek, Reason, Wall Street Journal
+            6. Each article must have both 'title' and 'url' fields)
         
         Response must be valid JSON only.`;
 
@@ -151,16 +159,29 @@ app.post('/analyze', upload.single('video'), async (req, res) => {
             };
         }
 
+        // Filter out articles with missing URLs
+        let validArticles = [];
+        if (analysis.related_articles && Array.isArray(analysis.related_articles)) {
+            validArticles = analysis.related_articles.filter(article => {
+                if (!article || !article.url || !article.title) {
+                    console.warn('Backend: Filtering invalid article:', article);
+                    return false;
+                }
+                return true;
+            });
+        }
+
         const responseData = {
             transcription: transcription,
             topic: analysis.topic || "General Political Discussion",
             bias_score: analysis.bias_score || 5,
             bias_label: analysis.bias_label || "Neutral",
             key_terms: analysis.key_terms || [],
-            related_articles: analysis.related_articles || []
+            related_articles: validArticles
         };
 
         console.log('Analysis complete:', responseData.bias_label);
+        console.log('Valid articles:', validArticles.length);
         res.json(responseData);
 
     } catch (error) {
