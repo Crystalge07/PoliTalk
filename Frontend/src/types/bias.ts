@@ -31,6 +31,8 @@ export interface AnalysisResult {
   evidence: Evidence[];
   key_terms: string[];
   related_articles: RelatedArticle[];
+  /** Set on live estimates sent while the video is still being heard. */
+  provisional?: boolean;
 }
 
 export const FRAMING_LABELS: Record<Framing, string> = {

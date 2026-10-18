@@ -1,4 +1,5 @@
 import { getVideoKey, isSharableId, type Platform } from './videoId';
+import { AudioStreamer, type StreamFailure } from './streamer';
 import { sendToBackground } from '@/lib/messaging';
 import type { AnalysisMode } from '@/lib/settings';
 import type { AnalysisResult } from '@/types/bias';
@@ -8,8 +9,8 @@ export type Phase =
   | 'checking'   // asking the backend whether this video was already analysed
   | 'ready'      // manual mode: waiting for the user to start an analysis
   | 'waiting'    // auto mode: waiting for the video to play long enough
-  | 'listening'  // recording an audio sample
-  | 'analyzing'  // sample sent, waiting for the backend
+  | 'listening'  // recording an audio sample, or streaming it for live analysis
+  | 'analyzing'  // waiting for the backend's final result
   | 'done'
   | 'error';
 
@@ -20,11 +21,22 @@ export interface TrackerState {
   error: string | null;
   /** 0..1 while listening */
   progress: number;
+  /** Live analysis: the transcript so far and the latest provisional result. */
+  transcript: string;
+  provisional: AnalysisResult | null;
+}
+
+export interface TrackerOptions {
+  mode: AnalysisMode;
+  /** Stream audio for live analysis instead of uploading a recorded sample. */
+  streaming: boolean;
 }
 
 const POLL_MS = 500;
-/** Length of the audio sample sent for analysis. Shorter samples are cheaper but less accurate. */
+/** Length of the recorded sample uploaded for analysis. Shorter samples are cheaper but less accurate. */
 const SAMPLE_SECONDS = 20;
+/** Live analysis usually stops earlier, once the backend's estimate converges. */
+const MAX_STREAM_SECONDS = 30;
 /** A sample cut short (scrolled away, video ended) is still analysed if it is at least this long. */
 const MIN_SAMPLE_SECONDS = 5;
 /** Auto mode: how long a video must play before we start listening, so fast scrolling costs nothing. */
@@ -32,15 +44,30 @@ const AUTO_START_DELAY_MS = 1500;
 const MAX_SESSION_RESULTS = 200;
 const NO_AUDIO_GIVE_UP_TICKS = 8;
 
-interface Recording {
+interface BaseRecording {
   key: string;
   video: HTMLVideoElement;
+  recordedMs: number;
+  lastTime: number;
+  startedAt: number;
+}
+
+interface BatchRecording extends BaseRecording {
+  kind: 'batch';
   recorder: MediaRecorder;
   stream: MediaStream;
   chunks: Blob[];
-  recordedMs: number;
-  lastTime: number;
 }
+
+interface StreamRecording extends BaseRecording {
+  kind: 'stream';
+  streamer: AudioStreamer;
+}
+
+type Recording = BatchRecording | StreamRecording;
+
+type LiveState = Pick<TrackerState, 'transcript' | 'provisional'>;
+const NO_LIVE_STATE: LiveState = { transcript: '', provisional: null };
 
 function pickMimeType(): string {
   for (const type of ['audio/webm;codecs=opus', 'audio/webm']) {
@@ -89,8 +116,16 @@ function findActiveVideo(platform: Platform): HTMLVideoElement | null {
 }
 
 export class VideoTracker {
-  private state: TrackerState = { phase: 'no-video', videoKey: null, result: null, error: null, progress: 0 };
+  private state: TrackerState = { phase: 'no-video', videoKey: null, result: null, error: null, progress: 0, ...NO_LIVE_STATE };
   private readonly results = new Map<string, AnalysisResult>();
+  /** Transcript and provisional result of live sessions still in progress. */
+  private readonly live = new Map<string, LiveState>();
+  /** Live sessions, including ones that stopped capturing and are waiting for a final result. */
+  private readonly streamers = new Set<AudioStreamer>();
+  private mode: AnalysisMode;
+  private streaming: boolean;
+  /** Set when the backend has no live endpoint, so later videos go straight to recorded samples. */
+  private streamingUnavailable = false;
   private readonly errors = new Map<string, string>();
   private readonly pending = new Set<string>();
   private readonly lookedUp = new Set<string>();
@@ -101,9 +136,12 @@ export class VideoTracker {
 
   constructor(
     private readonly platform: Platform,
-    private mode: AnalysisMode,
+    options: TrackerOptions,
     private readonly onChange: (state: TrackerState) => void,
-  ) {}
+  ) {
+    this.mode = options.mode;
+    this.streaming = options.streaming;
+  }
 
   start() {
     this.interval = window.setInterval(() => this.tick(), POLL_MS);
@@ -113,9 +151,13 @@ export class VideoTracker {
   stop() {
     window.clearInterval(this.interval);
     this.cancelRecording();
+    this.streamers.forEach((s) => s.cancel());
+    this.streamers.clear();
   }
 
-  setMode(mode: AnalysisMode) {
+  setOptions({ mode, streaming }: TrackerOptions) {
+    if (streaming !== this.streaming) this.streamingUnavailable = false;
+    this.streaming = streaming;
     this.mode = mode;
     const key = this.state.videoKey;
     if (key && !this.recording && (this.state.phase === 'ready' || this.state.phase === 'waiting')) {
@@ -130,6 +172,7 @@ export class VideoTracker {
     if (!key || !video || this.recording || this.pending.has(key)) return;
     this.results.delete(key);
     this.errors.delete(key);
+    this.live.delete(key);
     this.lookedUp.add(key);
     this.startRecording(video, key, true);
   }
@@ -181,14 +224,14 @@ export class VideoTracker {
   /** Shows whatever is known about a newly active video, looking it up in the backend cache if needed. */
   private showVideo(key: string | null) {
     if (!key) {
-      this.emit({ phase: 'no-video', videoKey: null, result: null, error: null, progress: 0 });
+      this.emit({ phase: 'no-video', videoKey: null, result: null, error: null, progress: 0, ...NO_LIVE_STATE });
       return;
     }
-    const base = { videoKey: key, result: null, error: null, progress: 0 };
+    const base = { videoKey: key, result: null, error: null, progress: 0, ...NO_LIVE_STATE };
     const result = this.results.get(key);
     if (result) return this.emit({ ...base, phase: 'done', result });
     if (this.errors.has(key)) return this.emit({ ...base, phase: 'error', error: this.errors.get(key)! });
-    if (this.pending.has(key)) return this.emit({ ...base, phase: 'analyzing' });
+    if (this.pending.has(key)) return this.emit({ ...base, ...this.live.get(key), phase: 'analyzing' });
 
     if (!isSharableId(key) || this.lookedUp.has(key)) return this.emit({ ...base, phase: this.idlePhase() });
 
@@ -203,7 +246,14 @@ export class VideoTracker {
   }
 
   private startRecording(video: HTMLVideoElement, key: string, userInitiated = false) {
-    let stream: MediaStream;
+    const stream = this.captureAudio(video, key, userInitiated);
+    if (!stream) return;
+    if (this.streaming && !this.streamingUnavailable) this.startStreaming(video, key, stream);
+    else this.startBatch(video, key, stream);
+  }
+
+  /** The video's audio tracks, or null (after reporting why) if there are none to record. */
+  private captureAudio(video: HTMLVideoElement, key: string, userInitiated: boolean): MediaStream | null {
     try {
       const source: MediaStream = (video as HTMLVideoElement & { captureStream(): MediaStream }).captureStream();
       const audio = source.getAudioTracks();
@@ -211,25 +261,89 @@ export class VideoTracker {
         // Tracks can appear a moment after playback starts.
         if (userInitiated) this.fail(key, 'No audio yet. Play the video, then try again.');
         else if (++this.noAudioTicks >= NO_AUDIO_GIVE_UP_TICKS) this.fail(key, 'This video has no audio to analyze.');
-        return;
+        return null;
       }
-      stream = new MediaStream(audio);
+      return new MediaStream(audio);
     } catch {
       this.fail(key, "This video's audio can't be captured.");
-      return;
+      return null;
     }
+  }
 
+  private newRecording(video: HTMLVideoElement, key: string): BaseRecording {
+    return { key, video, recordedMs: 0, lastTime: video.currentTime, startedAt: performance.now() };
+  }
+
+  /** Live analysis: audio streams to the backend, which sends back provisional results as it listens. */
+  private startStreaming(video: HTMLVideoElement, key: string, stream: MediaStream) {
+    const isCurrent = () => this.state.videoKey === key;
+    const rec: StreamRecording = {
+      ...this.newRecording(video, key),
+      kind: 'stream',
+      streamer: new AudioStreamer(stream, isSharableId(key) ? key : null, {
+        onTranscript: (transcript) => this.updateLive(key, { transcript }),
+        onProvisional: (provisional) => this.updateLive(key, { provisional }),
+        onStop: () => {
+          if (this.recording === rec) this.finishRecording();
+        },
+        onFinal: (result) => {
+          console.info('[PoliTalk] live analysis', { ...rec.streamer.timings, audio_seconds: rec.streamer.sampleSeconds });
+          if (this.recording === rec) this.recording = null;
+          this.endStream(rec);
+          this.storeResult(key, result);
+          if (isCurrent()) this.showVideo(key);
+        },
+        onError: (error, failure) => this.onStreamError(rec, error, failure),
+      }),
+    };
+    this.streamers.add(rec.streamer);
+    this.recording = rec;
+    this.live.set(key, NO_LIVE_STATE);
+    this.emit({ phase: 'listening', progress: 0, error: null, ...NO_LIVE_STATE });
+  }
+
+  private onStreamError(rec: StreamRecording, error: string, failure: StreamFailure) {
+    const wasCapturing = this.recording === rec;
+    if (wasCapturing) this.recording = null;
+    this.endStream(rec);
+
+    if (failure === 'session') return this.fail(rec.key, error);
+
+    // Live analysis isn't possible here; use a recorded sample instead.
+    if (failure === 'connect') this.streamingUnavailable = true;
+    console.warn(`[PoliTalk] Live analysis unavailable (${error}). Recording a sample instead.`);
+    if (this.state.videoKey !== rec.key) return;
+    const stream = wasCapturing ? this.captureAudio(rec.video, rec.key, true) : null;
+    if (stream) this.startBatch(rec.video, rec.key, stream);
+    else if (this.state.phase !== 'error') this.emit({ phase: this.idlePhase(), progress: 0, ...NO_LIVE_STATE });
+  }
+
+  private endStream(rec: StreamRecording) {
+    this.streamers.delete(rec.streamer);
+    this.pending.delete(rec.key);
+    this.live.delete(rec.key);
+  }
+
+  private updateLive(key: string, patch: Partial<LiveState>) {
+    const current = this.live.get(key);
+    if (!current) return;
+    this.live.set(key, { ...current, ...patch });
+    if (this.state.videoKey === key) this.emit(patch);
+  }
+
+  /** Records a sample with MediaRecorder and uploads it once complete. */
+  private startBatch(video: HTMLVideoElement, key: string, stream: MediaStream) {
     try {
       const mimeType = pickMimeType();
       const recorder = new MediaRecorder(stream, { ...(mimeType && { mimeType }), audioBitsPerSecond: 48_000 });
-      const recording: Recording = { key, video, recorder, stream, chunks: [], recordedMs: 0, lastTime: video.currentTime };
+      const recording: BatchRecording = { ...this.newRecording(video, key), kind: 'batch', recorder, stream, chunks: [] };
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) recording.chunks.push(e.data);
       };
       recorder.start(1000);
       if (video.paused) recorder.pause();
       this.recording = recording;
-      this.emit({ phase: 'listening', progress: 0, error: null });
+      this.emit({ phase: 'listening', progress: 0, error: null, ...NO_LIVE_STATE });
     } catch {
       stream.getTracks().forEach((t) => t.stop());
       this.fail(key, "This video's audio can't be recorded (it may be protected).");
@@ -239,12 +353,14 @@ export class VideoTracker {
   private updateRecording(video: HTMLVideoElement) {
     const rec = this.recording!;
     // Only time spent actually playing counts towards the sample.
-    if (video.paused) {
+    if (rec.kind === 'stream') {
+      rec.streamer.setPaused(video.paused);
+    } else if (video.paused) {
       if (rec.recorder.state === 'recording') rec.recorder.pause();
-    } else {
-      if (rec.recorder.state === 'paused') rec.recorder.resume();
-      rec.recordedMs += POLL_MS;
+    } else if (rec.recorder.state === 'paused') {
+      rec.recorder.resume();
     }
+    if (!video.paused) rec.recordedMs += POLL_MS;
 
     // Short clips loop; once playback wraps around, the rest would be a repeat.
     const looped = video.currentTime < rec.lastTime - 1;
@@ -252,10 +368,11 @@ export class VideoTracker {
     const nearEnd = video.duration > 0 && video.duration - video.currentTime < 0.3;
     // A very short looping clip keeps recording until the sample is long enough.
     const clipOver = (nearEnd || looped) && rec.recordedMs >= MIN_SAMPLE_SECONDS * 1000;
-    if (rec.recordedMs >= SAMPLE_SECONDS * 1000 || clipOver || video.ended) {
+    const limitMs = (rec.kind === 'stream' ? MAX_STREAM_SECONDS : SAMPLE_SECONDS) * 1000;
+    if (rec.recordedMs >= limitMs || clipOver || video.ended) {
       this.finishRecording();
     } else {
-      this.emit({ progress: rec.recordedMs / (SAMPLE_SECONDS * 1000) });
+      this.emit({ progress: rec.recordedMs / limitMs });
     }
   }
 
@@ -263,6 +380,11 @@ export class VideoTracker {
     const rec = this.recording;
     if (!rec) return;
     this.recording = null;
+    if (rec.kind === 'stream') {
+      rec.streamer.cancel();
+      this.endStream(rec);
+      return;
+    }
     rec.recorder.ondataavailable = null;
     if (rec.recorder.state !== 'inactive') rec.recorder.stop();
     rec.stream.getTracks().forEach((t) => t.stop());
@@ -271,7 +393,8 @@ export class VideoTracker {
   private finishRecording() {
     const rec = this.recording!;
     const seconds = Math.round(rec.recordedMs / 1000);
-    if (seconds < MIN_SAMPLE_SECONDS) {
+    const hasEstimate = Boolean(this.live.get(rec.key)?.provisional);
+    if (seconds < MIN_SAMPLE_SECONDS && !hasEstimate) {
       this.cancelRecording();
       if (this.state.videoKey === rec.key) this.emit({ phase: this.idlePhase(), progress: 0 });
       return;
@@ -280,6 +403,11 @@ export class VideoTracker {
     this.recording = null;
     this.pending.add(rec.key);
     if (this.state.videoKey === rec.key) this.emit({ phase: 'analyzing', progress: 1 });
+
+    if (rec.kind === 'stream') {
+      rec.streamer.end();
+      return;
+    }
 
     rec.recorder.onstop = async () => {
       rec.stream.getTracks().forEach((t) => t.stop());
@@ -292,6 +420,7 @@ export class VideoTracker {
         sampleSeconds: seconds,
       });
       this.pending.delete(rec.key);
+      console.info('[PoliTalk] recorded-sample analysis', { final: Math.round(performance.now() - rec.startedAt), audio_seconds: seconds });
       if (response.ok) this.storeResult(rec.key, response.data);
       else this.errors.set(rec.key, response.error);
       if (this.state.videoKey === rec.key) this.showVideo(rec.key);

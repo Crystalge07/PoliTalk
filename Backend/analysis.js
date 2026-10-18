@@ -106,6 +106,15 @@ function labelForScore(score) {
 
 const normalizeForMatch = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
 
+// Drop any "quote" the model did not actually take from the transcript.
+function filterEvidence(evidence, transcription) {
+    if (!Array.isArray(evidence)) return [];
+    const normalizedTranscript = normalizeForMatch(transcription);
+    return evidence
+        .filter((e) => e && e.quote && normalizedTranscript.includes(normalizeForMatch(e.quote)))
+        .slice(0, 3);
+}
+
 async function analyzeTranscript(transcription) {
     // Stop a transcript from closing the delimiter early.
     const safeTranscript = transcription.replace(/<\/?transcript>/gi, '');
@@ -126,13 +135,7 @@ async function analyzeTranscript(transcription) {
 
     const overall = isPolitical ? (clampScore(raw.overall_score) ?? 0) : 0;
 
-    // Drop any "quote" the model did not actually take from the transcript.
-    const normalizedTranscript = normalizeForMatch(transcription);
-    const evidence = isPolitical && Array.isArray(raw.evidence)
-        ? raw.evidence
-            .filter((e) => e && e.quote && normalizedTranscript.includes(normalizeForMatch(e.quote)))
-            .slice(0, 3)
-        : [];
+    const evidence = isPolitical ? filterEvidence(raw.evidence, transcription) : [];
 
     return {
         is_political: isPolitical,
@@ -150,4 +153,4 @@ async function analyzeTranscript(transcription) {
     };
 }
 
-module.exports = { transcribe, analyzeTranscript, ai, GEMINI_MODEL };
+module.exports = { transcribe, analyzeTranscript, filterEvidence, ai, GEMINI_MODEL };

@@ -2,7 +2,7 @@
 // here carry the extension's own origin (not the website's), which lets the
 // backend reject calls coming from web pages.
 import { getSettings } from '@/lib/settings';
-import type { BackgroundRequest, BackgroundResponse } from '@/lib/messaging';
+import { STREAM_PORT, type BackgroundRequest, type BackgroundResponse, type StreamClientMessage, type StreamServerMessage } from '@/lib/messaging';
 
 async function backendFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const { backendUrl, apiKey } = await getSettings();
@@ -58,6 +58,69 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, _sender, sendR
     .then(sendResponse)
     .catch((e: Error) => sendResponse({ ok: false, error: e.message }));
   return true; // keep the channel open for the async response
+});
+
+/**
+ * Relays a live-analysis session between a content script's port and a backend
+ * WebSocket. An open WebSocket keeps this service worker alive (Chrome 116+).
+ */
+function bridgeStream(port: chrome.runtime.Port) {
+  let ws: WebSocket | null = null;
+  let portOpen = true;
+  let apiKey = '';
+  const queue: StreamClientMessage[] = [];
+
+  const forward = (msg: StreamClientMessage) =>
+    ws!.send(JSON.stringify(msg.type === 'start' ? { ...msg, api_key: apiKey } : msg));
+
+  const reply = (msg: StreamServerMessage) => {
+    if (portOpen) port.postMessage(msg);
+  };
+  const closePort = () => {
+    if (!portOpen) return;
+    portOpen = false;
+    port.disconnect();
+  };
+
+  // Listeners go on before any await so no early message is lost.
+  port.onMessage.addListener((msg: StreamClientMessage) => {
+    if (ws?.readyState === WebSocket.OPEN) forward(msg);
+    else queue.push(msg);
+  });
+  port.onDisconnect.addListener(() => {
+    portOpen = false;
+    // Closing without 'end' tells the backend the viewer left; it still finishes and caches the result.
+    ws?.close();
+  });
+
+  getSettings().then((settings) => {
+    if (!portOpen) return;
+    const { backendUrl } = settings;
+    apiKey = settings.apiKey;
+    const url = `${backendUrl.replace(/\/+$/, '').replace(/^http/, 'ws')}/stream`;
+    try {
+      ws = new WebSocket(url);
+    } catch {
+      reply({ type: 'error', error: `Invalid backend URL: ${backendUrl}`, transport: true });
+      return closePort();
+    }
+
+    let opened = false;
+    ws.onopen = () => {
+      opened = true;
+      queue.forEach(forward);
+      queue.length = 0;
+    };
+    ws.onmessage = (event) => reply(JSON.parse(event.data));
+    ws.onclose = () => {
+      if (!opened) reply({ type: 'error', error: "Can't open a live connection to the backend.", transport: true });
+      closePort();
+    };
+  });
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === STREAM_PORT) bridgeStream(port);
 });
 
 // Nothing is recorded until the user has read the privacy notice, so show it on install.

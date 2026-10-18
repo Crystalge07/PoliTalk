@@ -16,18 +16,18 @@ function Panel({ platform, initial }: { platform: Platform; initial: Settings })
   const tracker = useRef<VideoTracker | null>(null);
 
   useEffect(() => {
-    const t = new VideoTracker(platform, initial.mode, setState);
+    const t = new VideoTracker(platform, { mode: initial.mode, streaming: initial.streaming }, setState);
     tracker.current = t;
     t.start();
     const unsubscribe = onSettingsChanged((s) => {
       setSettings(s);
-      t.setMode(s.mode);
+      t.setOptions({ mode: s.mode, streaming: s.streaming });
     });
     return () => {
       unsubscribe();
       t.stop();
     };
-  }, [platform, initial.mode]);
+  }, [platform, initial.mode, initial.streaming]);
 
   if (!state) return null;
   return (

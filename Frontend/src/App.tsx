@@ -44,7 +44,7 @@ function Consent({ onAccept }: { onAccept: () => void }) {
         <p className="flex items-center gap-1.5 font-semibold">
           <ShieldCheck className="h-4 w-4" /> Before you start
         </p>
-        <p>When a video plays on TikTok, Instagram or YouTube, PoliTalk records a <b>short audio sample</b> (about 20 seconds; no video) and sends it to the PoliTalk backend you configure.</p>
+        <p>When a video plays on TikTok, Instagram or YouTube, PoliTalk records <b>a short stretch of its audio</b> (up to about 30 seconds; no video) and sends it to the PoliTalk backend you configure.</p>
         <p>The backend sends that audio to <b>ElevenLabs</b> for transcription and the transcript to <b>Google Gemini</b> for analysis. Audio is processed in memory and never saved. Results are cached by video ID so the same video isn't analyzed twice.</p>
         <p>Scores are AI estimates and can be wrong. Use them as a prompt to think critically, not as a verdict.</p>
       </div>
@@ -101,6 +101,10 @@ function SettingsView({ settings, update }: { settings: Settings; update: (patch
             : 'Nothing is recorded until you press Analyze in the on-page panel.'}
         </p>
       </Group>
+
+      <Row label="Live analysis" hint="Show an estimate within seconds and refine it while the video plays.">
+        <Toggle checked={settings.streaming} onChange={(streaming) => update({ streaming })} />
+      </Row>
 
       <Group title="Sites">
         {(Object.keys(SITE_NAMES) as Platform[]).map((site) => (

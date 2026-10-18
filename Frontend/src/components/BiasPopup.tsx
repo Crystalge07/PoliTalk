@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { ChevronDown, ExternalLink, Loader2, Minus, Mic, Play, RotateCw, AlertTriangle, Quote } from 'lucide-react';
+import { ChevronDown, ExternalLink, Loader2, Minus, Mic, Play, Radio, RotateCw, AlertTriangle, Quote } from 'lucide-react';
 import { BiasSpectrum } from './BiasSpectrum';
 import { KeywordTags } from './KeywordTags';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -39,6 +39,8 @@ interface BiasPopupProps {
 
 export const BiasPopup = ({ state, collapsed, onCollapsedChange, onAnalyze }: BiasPopupProps) => {
   const busy = state.phase === 'checking' || state.phase === 'listening' || state.phase === 'analyzing';
+  const liveResult = busy ? state.provisional : null;
+  const statusText = liveResult ? 'Live estimate' : STATUS_TEXT[state.phase];
 
   if (collapsed) {
     return (
@@ -51,7 +53,7 @@ export const BiasPopup = ({ state, collapsed, onCollapsedChange, onAnalyze }: Bi
         <div className="flex flex-col items-start text-left">
           <span className="text-[11px] font-bold">PoliTalk</span>
           <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
-            {state.phase === 'done' && state.result ? state.result.label : STATUS_TEXT[state.phase]}
+            {state.phase === 'done' && state.result ? state.result.label : liveResult ? `${liveResult.label} · live` : statusText}
           </span>
         </div>
         {busy && <Loader2 className="ml-1 h-3 w-3 animate-spin text-muted-foreground" />}
@@ -72,7 +74,7 @@ export const BiasPopup = ({ state, collapsed, onCollapsedChange, onAnalyze }: Bi
               ) : (
                 <span className={cn('h-1.5 w-1.5', state.phase === 'done' ? 'bg-green-500' : state.phase === 'error' ? 'bg-destructive' : 'bg-muted-foreground')} />
               )}
-              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{STATUS_TEXT[state.phase]}</span>
+              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{statusText}</span>
             </div>
           </div>
         </div>
@@ -84,13 +86,15 @@ export const BiasPopup = ({ state, collapsed, onCollapsedChange, onAnalyze }: Bi
       <div className="space-y-3 overflow-y-auto p-3">
         {state.phase === 'done' && state.result ? (
           <ResultView result={state.result} onReanalyze={onAnalyze} />
+        ) : liveResult ? (
+          <ResultView result={liveResult} live={{ transcript: state.transcript, finishing: state.phase === 'analyzing' }} onReanalyze={onAnalyze} />
         ) : (
           <StatusView state={state} onAnalyze={onAnalyze} />
         )}
       </div>
 
       <footer className="border-t border-white/10 px-3 py-2 text-center text-[10px] text-muted-foreground">
-        AI estimate from a short audio sample · may be wrong
+        AI estimate from a short stretch of audio · may be wrong
       </footer>
     </div>
   );
@@ -114,8 +118,9 @@ function StatusView({ state, onAnalyze }: { state: TrackerState; onAnalyze: () =
         {state.phase === 'listening' && (
           <>
             <p className="flex items-center justify-center gap-2 text-sm">
-              <Mic className="h-4 w-4 animate-pulse-slow" /> Listening to a short sample…
+              <Mic className="h-4 w-4 animate-pulse-slow" /> Listening…
             </p>
+            {state.transcript && <LiveTranscript text={state.transcript} />}
             <div className="h-1 w-full bg-secondary">
               <div className="h-full bg-foreground transition-[width] duration-500" style={{ width: `${Math.round(state.progress * 100)}%` }} />
             </div>
@@ -123,9 +128,12 @@ function StatusView({ state, onAnalyze }: { state: TrackerState; onAnalyze: () =
           </>
         )}
         {state.phase === 'analyzing' && (
-          <p className="flex items-center justify-center gap-2 text-sm">
-            <Loader2 className="h-4 w-4 animate-spin" /> Transcribing and analyzing…
-          </p>
+          <>
+            <p className="flex items-center justify-center gap-2 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" /> Transcribing and analyzing…
+            </p>
+            {state.transcript && <LiveTranscript text={state.transcript} />}
+          </>
         )}
         {state.phase === 'error' && (
           <>
@@ -141,12 +149,25 @@ function StatusView({ state, onAnalyze }: { state: TrackerState; onAnalyze: () =
   );
 }
 
-function ResultView({ result, onReanalyze }: { result: AnalysisResult; onReanalyze: () => void }) {
+interface LiveInfo {
+  transcript: string;
+  /** Capture has stopped and the final result is on its way. */
+  finishing: boolean;
+}
+
+function ResultView({ result, live, onReanalyze }: { result: AnalysisResult; live?: LiveInfo; onReanalyze: () => void }) {
   const political = result.is_political;
-  const lowConfidence = political && result.confidence < 50;
+  const lowConfidence = political && result.confidence < 50 && !live;
+  const transcript = live?.transcript || result.transcription;
 
   return (
     <div className="space-y-3 animate-slide-up">
+      {live && (
+        <p className="flex items-center gap-2 border border-white/10 bg-white/5 p-2 text-[11px] leading-snug">
+          {live.finishing ? <Loader2 className="h-3 w-3 shrink-0 animate-spin" /> : <Radio className="h-3 w-3 shrink-0 animate-pulse-slow" />}
+          {live.finishing ? 'Finalizing and finding related coverage…' : 'Live estimate. It updates as the video plays.'}
+        </p>
+      )}
       <BiasSpectrum score={political ? result.overall_score : null} />
       <SpectrumLabels />
 
@@ -193,7 +214,7 @@ function ResultView({ result, onReanalyze }: { result: AnalysisResult; onReanaly
         </Section>
       )}
 
-      {political && (
+      {political && !live && (
         <Section title="Related coverage" count={result.related_articles.length}>
           {result.related_articles.length > 0 ? (
             <div className="space-y-1.5">
@@ -224,17 +245,17 @@ function ResultView({ result, onReanalyze }: { result: AnalysisResult; onReanaly
         </Section>
       )}
 
-      <Section title="Transcript">
-        {result.transcription ? (
+      <Section title="Transcript" defaultOpen={Boolean(live)}>
+        {transcript ? (
           <p className="max-h-[140px] overflow-y-auto border border-white/5 bg-secondary/20 p-2 text-xs italic leading-relaxed">
-            “{result.transcription}”
+            “{transcript}”
           </p>
         ) : (
           <Empty>No speech detected.</Empty>
         )}
       </Section>
 
-      <div className="flex items-center justify-between pt-1 text-[10px] text-muted-foreground">
+      {!live && <div className="flex items-center justify-between pt-1 text-[10px] text-muted-foreground">
         <span>
           {result.sample_seconds ? `${result.sample_seconds}s sample · ` : ''}
           {result.cached ? 'saved ' : ''}{timeAgo(result.analyzed_at)}
@@ -242,9 +263,16 @@ function ResultView({ result, onReanalyze }: { result: AnalysisResult; onReanaly
         <button onClick={onReanalyze} className="flex items-center gap-1 px-1.5 py-1 transition-colors hover:bg-secondary hover:text-foreground">
           <RotateCw className="h-3 w-3" /> Re-analyze
         </button>
-      </div>
+      </div>}
     </div>
   );
+}
+
+/** The last few words heard, so the user can see live transcription working. */
+function LiveTranscript({ text }: { text: string }) {
+  const words = text.split(/\s+/);
+  const tail = words.length > 24 ? `…${words.slice(-24).join(' ')}` : text;
+  return <p className="text-left text-[11px] italic leading-snug text-muted-foreground">“{tail}”</p>;
 }
 
 function SpectrumLabels() {

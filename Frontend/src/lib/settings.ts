@@ -7,6 +7,8 @@ export interface Settings {
   consented: boolean;
   enabled: boolean;
   mode: AnalysisMode;
+  /** Live analysis: stream audio and show estimates as they arrive. */
+  streaming: boolean;
   sites: Record<Platform, boolean>;
   backendUrl: string;
   apiKey: string;
@@ -17,6 +19,7 @@ export const DEFAULT_SETTINGS: Settings = {
   consented: false,
   enabled: false,
   mode: 'auto',
+  streaming: true,
   sites: { tiktok: true, instagram: true, youtube: true },
   backendUrl: 'http://localhost:3000',
   apiKey: '',

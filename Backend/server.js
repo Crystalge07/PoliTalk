@@ -4,7 +4,9 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const { transcribe, analyzeTranscript, GEMINI_MODEL } = require('./analysis');
-const { findRelatedArticles } = require('./news');
+const { analyzeFinal } = require('./pipeline');
+const { publicErrorMessage } = require('./result');
+const { attachStreamServer } = require('./stream');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -19,7 +21,6 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map((s) =
 
 const RATE_LIMIT_PER_MINUTE = Number(process.env.RATE_LIMIT_PER_MINUTE) || 20;
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-const MIN_WORDS_FOR_ANALYSIS = 8;
 
 if (!process.env.GEMINI_API_KEY) {
     console.error('CRITICAL ERROR: GEMINI_API_KEY not found in environment!');
@@ -51,25 +52,33 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'X-PoliTalk-Key'],
 }));
 
+const checkApiKey = (key) => !API_KEY || key === API_KEY;
+
 function requireApiKey(req, res, next) {
-    if (API_KEY && req.get('X-PoliTalk-Key') !== API_KEY) {
+    if (!checkApiKey(req.get('X-PoliTalk-Key'))) {
         return res.status(401).json({ error: 'Invalid or missing API key.' });
     }
     next();
 }
 
 const rateBuckets = new Map();
-function rateLimit(req, res, next) {
+/** Counts one request against `ip`. Returns 0 if allowed, otherwise seconds until the limit resets. */
+function takeRateToken(ip) {
     const now = Date.now();
-    const bucket = rateBuckets.get(req.ip) || { count: 0, resetAt: now + 60000 };
+    const bucket = rateBuckets.get(ip) || { count: 0, resetAt: now + 60000 };
     if (now > bucket.resetAt) {
         bucket.count = 0;
         bucket.resetAt = now + 60000;
     }
     bucket.count++;
-    rateBuckets.set(req.ip, bucket);
-    if (bucket.count > RATE_LIMIT_PER_MINUTE) {
-        res.set('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
+    rateBuckets.set(ip, bucket);
+    return bucket.count > RATE_LIMIT_PER_MINUTE ? Math.ceil((bucket.resetAt - now) / 1000) : 0;
+}
+
+function rateLimit(req, res, next) {
+    const retryAfter = takeRateToken(req.ip);
+    if (retryAfter) {
+        res.set('Retry-After', String(retryAfter));
         return res.status(429).json({ error: 'Too many requests. Please slow down.' });
     }
     next();
@@ -117,7 +126,7 @@ function cacheSet(id, data) {
 // --- Routes ---
 
 app.get('/health', (req, res) => {
-    res.json({ ok: true, model: GEMINI_MODEL, requires_key: Boolean(API_KEY) });
+    res.json({ ok: true, model: GEMINI_MODEL, requires_key: Boolean(API_KEY), streaming: true });
 });
 
 app.get('/analysis/:videoId', requireApiKey, (req, res) => {
@@ -136,64 +145,24 @@ app.post('/analyze', requireApiKey, rateLimit, upload.single('audio'), async (re
     console.log(`Audio received: ${req.file.size} bytes${videoId ? ` (${videoId})` : ''}`);
 
     try {
+        const started = Date.now();
         const transcription = await transcribe(req.file.buffer, req.file.originalname || 'sample.webm', req.file.mimetype);
-        const wordCount = transcription.split(/\s+/).filter(Boolean).length;
-
-        let analysis;
-        let relatedArticles = [];
-
-        if (wordCount < MIN_WORDS_FOR_ANALYSIS) {
-            // Music, silence or a few words: not enough speech to judge.
-            analysis = {
-                is_political: false,
-                topic: '',
-                label: 'Not Enough Speech',
-                overall_score: 0,
-                economic_score: null,
-                social_score: null,
-                framing: null,
-                confidence: 0,
-                reasoning: wordCount === 0
-                    ? 'No speech was detected in this clip.'
-                    : 'Too little speech was detected to assess political content.',
-                evidence: [],
-                key_terms: [],
-            };
-        } else {
-            analysis = await analyzeTranscript(transcription);
-            if (analysis.is_political && analysis.news_query) {
-                try {
-                    relatedArticles = await findRelatedArticles(analysis.news_query, analysis.topic);
-                } catch (e) {
-                    // Articles are supplementary; never fail the whole analysis over them.
-                    console.warn('Related article lookup failed:', e.message);
-                }
-            }
-        }
-
-        const { news_query, ...publicAnalysis } = analysis;
-        const result = {
-            video_id: videoId,
-            analyzed_at: new Date().toISOString(),
-            sample_seconds: sampleSeconds,
-            transcription,
-            ...publicAnalysis,
-            related_articles: relatedArticles,
-        };
+        const sttMs = Date.now() - started;
+        const { result, timings } = await analyzeFinal(transcription, { videoId, sampleSeconds });
 
         if (videoId) cacheSet(videoId, result);
-        console.log(`Analysis complete: ${result.label} (${relatedArticles.length} articles)`);
+        console.log('batch analysis', JSON.stringify({
+            video_id: videoId,
+            label: result.label,
+            articles: result.related_articles.length,
+            stt_ms: sttMs,
+            ...timings,
+            total_ms: Date.now() - started,
+        }));
         res.json({ ...result, cached: false });
     } catch (error) {
-        const upstreamStatus = error.response?.status;
-        console.error('Processing error:', upstreamStatus || '', error.response?.data ? JSON.stringify(error.response.data) : error.message);
-
-        let message = 'Analysis failed. Check the backend logs for details.';
-        if (upstreamStatus === 401 || upstreamStatus === 403) message = 'The backend\'s transcription API key was rejected.';
-        else if (upstreamStatus === 429) message = 'An upstream API rate limit was hit. Try again shortly.';
-        else if (/API key/i.test(error.message)) message = 'The backend\'s Gemini API key is missing or invalid.';
-
-        res.status(502).json({ error: message });
+        console.error('Processing error:', error.response?.status || '', error.response?.data ? JSON.stringify(error.response.data) : error.message);
+        res.status(502).json({ error: publicErrorMessage(error) });
     }
 });
 
@@ -203,6 +172,19 @@ app.use((err, req, res, next) => {
     res.status(status).json({ error: err.message });
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
     console.log(`PoliTalk backend running at http://localhost:${port} (model: ${GEMINI_MODEL})`);
+});
+
+attachStreamServer(server, {
+    isAllowedOrigin,
+    checkApiKey,
+    takeRateToken,
+    isValidVideoId,
+    analyze: analyzeTranscript,
+    finalize: async (text, opts) => {
+        const { result } = await analyzeFinal(text, opts);
+        if (opts.videoId) cacheSet(opts.videoId, result);
+        return { ...result, cached: false };
+    },
 });

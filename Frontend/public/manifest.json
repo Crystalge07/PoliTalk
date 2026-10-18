@@ -43,6 +43,7 @@
     {
       "resources": [
         "content.js",
+        "pcm-worklet.js",
         "assets/*",
         "logo.png"
       ],

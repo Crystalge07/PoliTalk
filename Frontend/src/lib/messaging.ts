@@ -31,3 +31,21 @@ export function sendToBackground<R extends BackgroundRequest>(request: R): Promi
     }
   });
 }
+
+/** Name of the long-lived port a content script opens for live (streaming) analysis. */
+export const STREAM_PORT = 'politalk-stream';
+
+/** Content script -> service worker -> backend. The service worker adds the API key to `start`. */
+export type StreamClientMessage =
+  | { type: 'start'; video_id: string | null }
+  | { type: 'audio'; data: string }
+  | { type: 'end' };
+
+/** Backend -> service worker -> content script. `transport` marks errors raised by the service worker itself. */
+export type StreamServerMessage =
+  | { type: 'ready' }
+  | { type: 'transcript'; text: string }
+  | { type: 'analysis'; version: number; result: AnalysisResult }
+  | { type: 'stop'; reason: string }
+  | { type: 'final'; result: AnalysisResult }
+  | { type: 'error'; error: string; transport?: boolean };
