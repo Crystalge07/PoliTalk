@@ -1,81 +1,94 @@
-import { createRoot } from 'react-dom/client'
-import App from './App'
-// @ts-ignore
-import css from './index.css?inline'
+import { useEffect, useRef, useState } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { BiasPopup } from '@/components/BiasPopup';
+import { VideoTracker, type TrackerState } from '@/logic/recorder';
+import { getPlatform, type Platform } from '@/logic/videoId';
+import { getSettings, onSettingsChanged, updateSettings, type Settings } from '@/lib/settings';
+import css from './index.css?inline';
 
-const CONTAINER_ID = 'tiktok-bias-checker-root';
+const CONTAINER_ID = 'politalk-root';
 
-const injectExtension = () => {
-    let container = document.getElementById(CONTAINER_ID);
+const isActive = (s: Settings, platform: Platform) => s.consented && s.enabled && s.sites[platform];
 
-    if (container) {
-        // If it's attached elsewhere, move it to the very root
-        if (container.parentElement !== document.documentElement) {
-            document.documentElement.appendChild(container);
-        }
-        // If shadow DOM was somehow cleared, reset
-        if (!container.shadowRoot || container.shadowRoot.childElementCount === 0) {
-            container.remove();
-            container = null;
-        }
+function Panel({ platform, initial }: { platform: Platform; initial: Settings }) {
+  const [settings, setSettings] = useState(initial);
+  const [state, setState] = useState<TrackerState | null>(null);
+  const tracker = useRef<VideoTracker | null>(null);
+
+  useEffect(() => {
+    const t = new VideoTracker(platform, initial.mode, setState);
+    tracker.current = t;
+    t.start();
+    const unsubscribe = onSettingsChanged((s) => {
+      setSettings(s);
+      t.setMode(s.mode);
+    });
+    return () => {
+      unsubscribe();
+      t.stop();
+    };
+  }, [platform, initial.mode]);
+
+  if (!state) return null;
+  return (
+    <BiasPopup
+      state={state}
+      collapsed={settings.panelCollapsed}
+      onCollapsedChange={(panelCollapsed) => updateSettings({ panelCollapsed })}
+      onAnalyze={() => tracker.current?.analyzeNow()}
+    />
+  );
+}
+
+let root: Root | null = null;
+
+function mount(platform: Platform, settings: Settings) {
+  if (root && document.getElementById(CONTAINER_ID)) return;
+  unmount();
+
+  const host = document.createElement('div');
+  host.id = CONTAINER_ID;
+  host.style.setProperty('all', 'initial');
+  host.style.setProperty('position', 'fixed', 'important');
+  host.style.setProperty('bottom', '24px', 'important');
+  host.style.setProperty('left', '24px', 'important');
+  host.style.setProperty('z-index', '2147483647', 'important');
+  document.documentElement.appendChild(host);
+
+  // A closed shadow root keeps page scripts and styles away from the panel.
+  const shadow = host.attachShadow({ mode: 'closed' });
+  const style = document.createElement('style');
+  style.textContent = css;
+  const rootDiv = document.createElement('div');
+  rootDiv.className = 'extension-root';
+  shadow.append(style, rootDiv);
+
+  root = createRoot(rootDiv);
+  root.render(<Panel platform={platform} initial={settings} />);
+}
+
+function unmount() {
+  root?.unmount();
+  root = null;
+  document.getElementById(CONTAINER_ID)?.remove();
+}
+
+async function init() {
+  const platform = getPlatform();
+  if (!platform) return;
+
+  const apply = (s: Settings) => (isActive(s, platform) ? mount(platform, s) : unmount());
+  apply(await getSettings());
+  onSettingsChanged(apply);
+
+  // Single-page apps occasionally wipe foreign nodes from <html>; put the panel back.
+  setInterval(async () => {
+    if (root && !document.getElementById(CONTAINER_ID)) {
+      root.unmount();
+      root = null;
+      apply(await getSettings());
     }
+  }, 2000);
+}
 
-    if (!container) {
-        console.log('PoliTok: Injecting extension...');
-        container = document.createElement('div');
-        container.id = CONTAINER_ID;
-
-        // Minimal footprint for the host container
-        Object.assign(container.style, {
-            position: 'fixed',
-            top: '0',
-            left: '0',
-            width: '0',
-            height: '0',
-            zIndex: '2147483647',
-            pointerEvents: 'none',
-            display: 'block',
-            all: 'initial' // Reset any inherited styles
-        });
-        // Force Z-index with important
-        container.style.setProperty('z-index', '2147483647', 'important');
-
-        document.documentElement.appendChild(container);
-
-        const shadow = container.attachShadow({ mode: 'open' });
-        const styleParams = document.createElement('style');
-        styleParams.textContent = css + `
-      .extension-root {
-        position: fixed !important;
-        bottom: 24px !important;
-        left: 24px !important;
-        pointer-events: auto !important;
-        z-index: 2147483647 !important;
-      }
-    `;
-        shadow.appendChild(styleParams);
-
-        const rootDiv = document.createElement('div');
-        rootDiv.className = 'extension-root';
-        shadow.appendChild(rootDiv);
-
-        createRoot(rootDiv).render(<App />);
-    }
-};
-
-injectExtension();
-
-setInterval(injectExtension, 2000);
-
-// Watch for any removal of our container or changes to the root
-const observer = new MutationObserver(() => {
-    const container = document.getElementById(CONTAINER_ID);
-    if (!container || container.parentElement !== document.documentElement || !container.shadowRoot || container.shadowRoot.childElementCount === 0) {
-        injectExtension();
-    }
-});
-
-observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true // Watch deeper to catch stealthy removals
-});
+init();

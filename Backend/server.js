@@ -1,228 +1,208 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
-const axios = require('axios');
-const FormData = require('form-data');
-require('dotenv').config();
+const { transcribe, analyzeTranscript, GEMINI_MODEL } = require('./analysis');
+const { findRelatedArticles } = require('./news');
 
 const app = express();
-const port = 3000;
+const port = Number(process.env.PORT) || 3000;
 
-if (process.env.GEMINI_API_KEY) {
-    console.log('Gemini API Key loaded successfully (starts with:', process.env.GEMINI_API_KEY.substring(0, 4) + '...)');
-} else {
+// Optional shared secret. When set, the extension must send it in X-PoliTalk-Key
+// (configured in the extension's settings popup). Set this for any deployed backend.
+const API_KEY = process.env.POLITALK_API_KEY || '';
+
+// Comma-separated list of exact origins, e.g. "chrome-extension://abcdefghijklmnop".
+// When empty, any chrome-extension:// origin is accepted.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+const RATE_LIMIT_PER_MINUTE = Number(process.env.RATE_LIMIT_PER_MINUTE) || 20;
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const MIN_WORDS_FOR_ANALYSIS = 8;
+
+if (!process.env.GEMINI_API_KEY) {
     console.error('CRITICAL ERROR: GEMINI_API_KEY not found in environment!');
 }
-
-if (process.env.ELEVENLABS_API_KEY) {
-    console.log('ElevenLabs API Key loaded successfully (starts with:', process.env.ELEVENLABS_API_KEY.substring(0, 4) + '...)');
-} else {
-    console.warn('WARNING: ELEVENLABS_API_KEY not found in environment. Transcription will fail.');
+if (!process.env.ELEVENLABS_API_KEY) {
+    console.error('CRITICAL ERROR: ELEVENLABS_API_KEY not found in environment! Transcription will fail.');
 }
 
-// Middleware
-app.use(cors({
-    origin: '*', // Allow all origins (including browser extensions)
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.use(express.json());
+// --- Security ---
 
-// Ensure uploads directory exists
-const uploadDir = 'uploads';
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir);
+function isAllowedOrigin(origin) {
+    if (ALLOWED_ORIGINS.length > 0) return ALLOWED_ORIGINS.includes(origin);
+    return origin.startsWith('chrome-extension://');
 }
 
-// Multer Storage Configuration
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, uploadDir)
-    },
-    filename: function (req, file, cb) {
-        cb(null, 'temp_' + Date.now() + path.extname(file.originalname));
+// CORS headers alone don't stop a web page from *sending* a request (and spending
+// API credits), so requests from website origins are rejected outright.
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && !isAllowedOrigin(origin)) {
+        return res.status(403).json({ error: 'Origin not allowed.' });
     }
+    next();
 });
 
-const upload = multer({ storage: storage });
+app.use(cors({
+    origin: (origin, cb) => cb(null, !origin || isAllowedOrigin(origin)),
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'X-PoliTalk-Key'],
+}));
 
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+function requireApiKey(req, res, next) {
+    if (API_KEY && req.get('X-PoliTalk-Key') !== API_KEY) {
+        return res.status(401).json({ error: 'Invalid or missing API key.' });
+    }
+    next();
+}
 
-// Analyze Endpoint
-app.post('/analyze', upload.single('video'), async (req, res) => {
+const rateBuckets = new Map();
+function rateLimit(req, res, next) {
+    const now = Date.now();
+    const bucket = rateBuckets.get(req.ip) || { count: 0, resetAt: now + 60000 };
+    if (now > bucket.resetAt) {
+        bucket.count = 0;
+        bucket.resetAt = now + 60000;
+    }
+    bucket.count++;
+    rateBuckets.set(req.ip, bucket);
+    if (bucket.count > RATE_LIMIT_PER_MINUTE) {
+        res.set('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
+        return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+    }
+    next();
+}
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, bucket] of rateBuckets) if (now > bucket.resetAt) rateBuckets.delete(ip);
+}, 60000).unref();
+
+// Audio stays in memory; nothing is written to disk.
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
+    fileFilter: (req, file, cb) => {
+        const ok = file.mimetype.startsWith('audio/') || file.mimetype === 'video/webm';
+        cb(ok ? null : new Error('Only audio uploads are accepted.'), ok);
+    },
+});
+
+// --- Result cache (keyed by platform video ID) ---
+
+const CACHE_TTL_MS = (Number(process.env.CACHE_TTL_HOURS) || 24) * 60 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 1000;
+const cache = new Map();
+
+const isValidVideoId = (id) => typeof id === 'string' && id.length <= 200 && /^[\w:.\-]+$/.test(id);
+
+function cacheGet(id) {
+    const entry = cache.get(id);
+    if (!entry) return null;
+    if (Date.now() - entry.storedAt > CACHE_TTL_MS) {
+        cache.delete(id);
+        return null;
+    }
+    return entry.data;
+}
+
+function cacheSet(id, data) {
+    cache.delete(id);
+    cache.set(id, { data, storedAt: Date.now() });
+    // Map iterates in insertion order, so the first key is the oldest.
+    while (cache.size > CACHE_MAX_ENTRIES) cache.delete(cache.keys().next().value);
+}
+
+// --- Routes ---
+
+app.get('/health', (req, res) => {
+    res.json({ ok: true, model: GEMINI_MODEL, requires_key: Boolean(API_KEY) });
+});
+
+app.get('/analysis/:videoId', requireApiKey, (req, res) => {
+    const data = isValidVideoId(req.params.videoId) ? cacheGet(req.params.videoId) : null;
+    if (!data) return res.status(404).json({ error: 'Not cached.' });
+    res.json({ ...data, cached: true });
+});
+
+app.post('/analyze', requireApiKey, rateLimit, upload.single('audio'), async (req, res) => {
     if (!req.file) {
-        return res.status(400).json({ error: 'No video file provided.' });
+        return res.status(400).json({ error: 'No audio file provided.' });
     }
 
-    const filePath = req.file.path;
-    console.log('Video received:', filePath);
-
-    let transcription = "";
+    const videoId = isValidVideoId(req.body.video_id) ? req.body.video_id : null;
+    const sampleSeconds = Math.round(Number(req.body.sample_seconds) || 0) || null;
+    console.log(`Audio received: ${req.file.size} bytes${videoId ? ` (${videoId})` : ''}`);
 
     try {
-        // --- STEP 1: ELEVENLABS TRANSCRIPTION ---
-        console.log('Transcribing with ElevenLabs...');
+        const transcription = await transcribe(req.file.buffer, req.file.originalname || 'sample.webm', req.file.mimetype);
+        const wordCount = transcription.split(/\s+/).filter(Boolean).length;
 
-        const form = new FormData();
-        form.append('file', fs.createReadStream(filePath));
-        form.append('model_id', 'scribe_v2');
-        // form.append('tag', 'politok'); // Optional
+        let analysis;
+        let relatedArticles = [];
 
-        const scribeResponse = await axios.post('https://api.elevenlabs.io/v1/speech-to-text', form, {
-            headers: {
-                ...form.getHeaders(),
-                'xi-api-key': process.env.ELEVENLABS_API_KEY,
-            },
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-        });
-
-        transcription = scribeResponse.data.text;
-        console.log('Transcription complete:', transcription.substring(0, 50) + '...');
-
-        if (!transcription || transcription.trim().length === 0) {
-            console.log('No speech detected in audio - assuming non-political content (music/entertainment).');
-            return res.json({
-                transcription: "No speech detected.",
-                bias_score: 5,
-                bias_label: "Non-Political",
+        if (wordCount < MIN_WORDS_FOR_ANALYSIS) {
+            // Music, silence or a few words: not enough speech to judge.
+            analysis = {
+                is_political: false,
+                topic: '',
+                label: 'Not Enough Speech',
+                overall_score: 0,
+                economic_score: null,
+                social_score: null,
+                framing: null,
+                confidence: 0,
+                reasoning: wordCount === 0
+                    ? 'No speech was detected in this clip.'
+                    : 'Too little speech was detected to assess political content.',
+                evidence: [],
                 key_terms: [],
-                related_articles: []
-            });
-        }
-
-        // --- STEP 2: GEMINI BIAS ANALYSIS ---
-        console.log('Analyzing bias with Gemini...');
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({
-            model: "gemini-2.0-flash-exp",
-            generationConfig: {
-                // JSON Mode cannot be used with Google Search Grounding
-            },
-            tools: [
-                {
-                    googleSearch: {},
-                },
-            ],
-        });
-
-        const prompt = `Analyze the political bias of this transcript from a social media video and find related real-world news: "${transcription}"
-        
-        CRITICAL: First determine if the content is POLITICAL or NON-POLITICAL:
-        - NON-POLITICAL: Only for purely entertainment, music, personal vlogs, cooking, travel, lifestyle, or content with NO political/social commentary. These should have bias_label: 'Non-Political', bias_score: 5, and empty key_terms/related_articles.
-        - POLITICAL: Any content discussing politics, government, social issues, elections, policies, current events, or political figures. Even if neutral/balanced, this is POLITICAL content and should use the bias spectrum below.
-
-        Bias Spectrum (ONLY for POLITICAL content):
-        - 1-4 (Left/Progressive): Focus on social progress, systemic change, secularism, collective welfare, or progressive social justice.
-        - 5 (Center/Neutral): Balanced, objective political reporting, or non-partisan political issues. Use labels like 'Center', 'Neutral', 'Moderate', NOT 'Non-Political'.
-        - 6-10 (Right/Conservative): Focus on traditional values, individual liberty, free markets, nationalism, or conservative social views.
-
-        Based on the transcript, return a JSON object with:
-        - bias_score (1-10) - For political content, use 1-10. For non-political, use 5.
-        - bias_label (short string like 'Center-Left', 'Strong Right', 'Center', or 'Non-Political')
-        - key_terms (MUST include 3-5 keywords if political content, empty array if non-political)
-        - related_articles (CRITICAL RULES: 
-            1. Provide articles if EITHER:
-               a) The transcript discusses a SPECIFIC event with proper nouns (names, locations, dates), OR
-               b) The transcript discusses a politically-charged topic (AI regulation, climate change, immigration, healthcare, gun control, etc.) with substantive commentary
-            2. DO NOT provide articles for purely generic statements like "politics is crazy" or "things are changing"
-            3. Articles MUST be directly related to the exact topic discussed - NO tangentially related articles
-            4. It is ALWAYS better to return an empty array [] than to provide unrelated or loosely connected articles
-            5. If providing articles, find exactly 3 from ONLY these trusted sources: Reuters, Associated Press, The Canadian Press, PBS NewsHour, NPR, Toronto Star, CBC, CPAC, BBC, Forbes, The Hill, MarketWatch, Morning Brew, Newsweek, Reason, Wall Street Journal
-            6. Each article must have both 'title' and 'url' fields)
-        
-        Response must be valid JSON only.`;
-
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
-
-        let analysis = null;
-        try {
-            // Attempt clean parse
-            analysis = JSON.parse(text);
-        } catch (e) {
-            console.log('Attempting regex extraction for JSON...');
-            const jsonMatch = text.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
+            };
+        } else {
+            analysis = await analyzeTranscript(transcription);
+            if (analysis.is_political && analysis.news_query) {
                 try {
-                    analysis = JSON.parse(jsonMatch[0]);
-                } catch (innerE) {
-                    console.error('Regex extraction failed to parse.');
+                    relatedArticles = await findRelatedArticles(analysis.news_query, analysis.topic);
+                } catch (e) {
+                    // Articles are supplementary; never fail the whole analysis over them.
+                    console.warn('Related article lookup failed:', e.message);
                 }
             }
         }
 
-        // --- STEP 3: CONSTRUCT RESPONSE ---
-        // If analysis failed entirely, provide a safe fallback
-        if (!analysis) {
-            console.log('Using safe fallback for analysis.');
-            analysis = {
-                bias_score: 5,
-                bias_label: "Non-Political / Neutral",
-                key_terms: [],
-                related_articles: []
-            };
-        }
-
-        // Filter out articles with missing URLs
-        let validArticles = [];
-        if (analysis.related_articles && Array.isArray(analysis.related_articles)) {
-            validArticles = analysis.related_articles.filter(article => {
-                if (!article || !article.url || !article.title) {
-                    console.warn('Backend: Filtering invalid article:', article);
-                    return false;
-                }
-                return true;
-            });
-        }
-
-        const responseData = {
-            transcription: transcription,
-            topic: analysis.topic || "General Political Discussion",
-            bias_score: analysis.bias_score || 5,
-            bias_label: analysis.bias_label || "Neutral",
-            key_terms: analysis.key_terms || [],
-            related_articles: validArticles
+        const { news_query, ...publicAnalysis } = analysis;
+        const result = {
+            video_id: videoId,
+            analyzed_at: new Date().toISOString(),
+            sample_seconds: sampleSeconds,
+            transcription,
+            ...publicAnalysis,
+            related_articles: relatedArticles,
         };
 
-        console.log('Analysis complete:', responseData.bias_label);
-        console.log('Valid articles:', validArticles.length);
-        res.json(responseData);
-
+        if (videoId) cacheSet(videoId, result);
+        console.log(`Analysis complete: ${result.label} (${relatedArticles.length} articles)`);
+        res.json({ ...result, cached: false });
     } catch (error) {
-        console.error('Processing Error:');
-        if (error.response) {
-            console.error('Status:', error.response.status);
-            console.error('Data:', JSON.stringify(error.response.data));
-        } else {
-            console.error('Message:', error.message);
-        }
+        const upstreamStatus = error.response?.status;
+        console.error('Processing error:', upstreamStatus || '', error.response?.data ? JSON.stringify(error.response.data) : error.message);
 
-        let label = "Analysis Error";
-        let message = error.message;
+        let message = 'Analysis failed. Check the backend logs for details.';
+        if (upstreamStatus === 401 || upstreamStatus === 403) message = 'The backend\'s transcription API key was rejected.';
+        else if (upstreamStatus === 429) message = 'An upstream API rate limit was hit. Try again shortly.';
+        else if (/API key/i.test(error.message)) message = 'The backend\'s Gemini API key is missing or invalid.';
 
-        if (error.response && error.response.data) {
-            message = JSON.stringify(error.response.data);
-        }
-
-        res.status(error.response?.status || 500).json({
-            bias_score: 5,
-            bias_label: label,
-            key_terms: ["System Error"],
-            transcription: "An error occurred during processing.",
-            error_details: message
-        });
-    } finally {
-        // Cleanup temp file
-        fs.unlink(filePath, (err) => {
-            if (err) console.error('Error deleting file:', filePath, err);
-            else console.log('Deleted temp file:', filePath);
-        });
+        res.status(502).json({ error: message });
     }
 });
 
+// Multer and other middleware errors (e.g. file too large) end up here.
+app.use((err, req, res, next) => {
+    const status = err instanceof multer.MulterError ? 413 : 400;
+    res.status(status).json({ error: err.message });
+});
+
 app.listen(port, () => {
-    console.log(`PoliTok Backend running at http://localhost:${port}`);
+    console.log(`PoliTalk backend running at http://localhost:${port} (model: ${GEMINI_MODEL})`);
 });

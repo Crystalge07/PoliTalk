@@ -1,47 +1,31 @@
-import { BiasLevel, BIAS_POSITIONS } from '@/types/bias';
+import { scoreToPosition } from '@/types/bias';
 import { cn } from '@/lib/utils';
 
 interface BiasSpectrumProps {
-  level: BiasLevel | null;
-  isAnimating?: boolean;
+  /** -5..+5, or null while there is no result yet */
+  score: number | null;
+  pending?: boolean;
+  size?: 'lg' | 'sm';
 }
 
-export const BiasSpectrum = ({ level, isAnimating = false }: BiasSpectrumProps) => {
-  const position = level ? BIAS_POSITIONS[level] : 50;
-  
-  const getGlowClass = () => {
-    if (!level) return '';
-    if (level.includes('left')) return 'bias-glow-left';
-    if (level.includes('right')) return 'bias-glow-right';
-    return 'bias-glow-center';
-  };
+export const BiasSpectrum = ({ score, pending = false, size = 'lg' }: BiasSpectrumProps) => {
+  const position = scoreToPosition(score ?? 0);
 
   return (
-    <div className="w-full space-y-2">
-      {/* Spectrum Bar */}
-      <div className="relative h-3 spectrum-bar overflow-hidden">
-        {/* Indicator */}
+    <div className="relative w-full" role="img" aria-label={score === null ? 'No score' : `Score ${score} on a scale from -5 (left) to +5 (right)`}>
+      <div className={cn('spectrum-bar w-full', size === 'lg' ? 'h-2.5' : 'h-1.5', score === null && 'opacity-30')} />
+      {/* Center tick */}
+      <div className="absolute left-1/2 top-0 h-full w-px bg-background/70" />
+      {score !== null && (
         <div
           className={cn(
-            "absolute top-1/2 -translate-y-1/2 w-1.5 h-5 bg-white border border-background bias-indicator",
-            getGlowClass(),
-            isAnimating && "animate-pulse-slow"
+            'absolute top-1/2 -translate-x-1/2 -translate-y-1/2 border-2 border-background bg-white shadow',
+            size === 'lg' ? 'h-5 w-2' : 'h-3 w-1.5',
+            pending && 'animate-pulse-slow',
           )}
-          style={{ 
-            left: `calc(${position}% - 3px)`,
-            transition: 'left 0.5s ease-out'
-          }}
+          style={{ left: `${position}%`, transition: 'left 0.5s ease-out' }}
         />
-      </div>
-      
-      {/* Labels */}
-      <div className="flex justify-between text-[10px] text-muted-foreground font-medium">
-        <span className="text-bias-strong-left">Strong Left</span>
-        <span className="text-bias-left">Left</span>
-        <span className="text-bias-center">Center</span>
-        <span className="text-bias-right">Right</span>
-        <span className="text-bias-strong-right">Strong Right</span>
-      </div>
+      )}
     </div>
   );
 };

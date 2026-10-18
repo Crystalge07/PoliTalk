@@ -1,30 +1,50 @@
-export type BiasLevel = 'strong-left' | 'left' | 'center' | 'right' | 'strong-right';
+export type Framing = 'informational' | 'opinion' | 'persuasive' | 'inflammatory';
 
-export interface BiasResult {
-  level: BiasLevel;
-  confidence: number; // 0-100
+export interface Evidence {
+  quote: string;
+  explanation: string;
+}
+
+export interface RelatedArticle {
+  title: string;
+  url: string;
+  source: string;
+}
+
+/** Shape returned by the backend's /analyze and /analysis/:id endpoints. */
+export interface AnalysisResult {
+  video_id: string | null;
+  analyzed_at: string;
+  sample_seconds: number | null;
+  cached: boolean;
+  transcription: string;
+  is_political: boolean;
+  topic: string;
+  label: string;
+  /** -5 (left) .. +5 (right), 0 = center */
+  overall_score: number;
+  economic_score: number | null;
+  social_score: number | null;
+  framing: Framing | null;
+  confidence: number;
   reasoning: string;
-  keywords: string[];
+  evidence: Evidence[];
+  key_terms: string[];
+  related_articles: RelatedArticle[];
 }
 
-export interface AnalysisState {
-  status: 'idle' | 'analyzing' | 'complete' | 'error';
-  result: BiasResult | null;
-  error: string | null;
+export const FRAMING_LABELS: Record<Framing, string> = {
+  informational: 'Informational',
+  opinion: 'Opinion',
+  persuasive: 'Persuasive',
+  inflammatory: 'Inflammatory',
+};
+
+/** Maps a -5..+5 score to a 0..100 position on the spectrum bar. */
+export const scoreToPosition = (score: number) => ((score + 5) / 10) * 100;
+
+export function scoreTone(score: number): 'left' | 'center' | 'right' {
+  if (score < 0) return 'left';
+  if (score > 0) return 'right';
+  return 'center';
 }
-
-export const BIAS_LABELS: Record<BiasLevel, string> = {
-  'strong-left': 'Strong Left',
-  'left': 'Left',
-  'center': 'Center',
-  'right': 'Right',
-  'strong-right': 'Strong Right',
-};
-
-export const BIAS_POSITIONS: Record<BiasLevel, number> = {
-  'strong-left': 0,
-  'left': 25,
-  'center': 50,
-  'right': 75,
-  'strong-right': 100,
-};

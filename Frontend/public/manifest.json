@@ -1,27 +1,29 @@
 {
   "manifest_version": 3,
-  "name": "TikTok Bias Detector",
-  "version": "1.0",
-  "description": "Detect political bias in TikTok videos.",
+  "name": "PoliTalk",
+  "version": "2.0.0",
+  "description": "See the political lean of short-form videos on TikTok, Instagram and YouTube, with the evidence behind it.",
   "permissions": [
-    "activeTab",
-    "scripting"
+    "storage"
   ],
   "host_permissions": [
-    "http://localhost:3000/*",
-    "*://www.instagram.com/*",
-    "*://www.youtube.com/*"
+    "http://localhost:3000/*"
   ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
   "action": {
     "default_popup": "index.html",
+    "default_title": "PoliTalk",
     "default_icon": {
-      "16": "logo.png",
+      "16": "logo-small.png",
       "48": "logo.png",
       "128": "logo.png"
     }
   },
   "icons": {
-    "16": "logo.png",
+    "16": "logo-small.png",
     "48": "logo.png",
     "128": "logo.png"
   },
@@ -42,7 +44,6 @@
       "resources": [
         "content.js",
         "assets/*",
-        "sidebar.css",
         "logo.png"
       ],
       "matches": [

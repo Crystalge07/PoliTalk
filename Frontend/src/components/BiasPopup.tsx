@@ -1,298 +1,297 @@
-import { useState, useEffect } from 'react';
-import { Scale, Eye, EyeOff, ChevronDown, Loader2, Newspaper, Link as LinkIcon, ExternalLink } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { ChevronDown, ExternalLink, Loader2, Minus, Mic, Play, RotateCw, AlertTriangle, Quote } from 'lucide-react';
 import { BiasSpectrum } from './BiasSpectrum';
 import { KeywordTags } from './KeywordTags';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
+import type { TrackerState } from '@/logic/recorder';
+import { FRAMING_LABELS, type AnalysisResult } from '@/types/bias';
 
-import { BiasLevel } from '@/types/bias';
+const logoUrl = chrome.runtime.getURL('logo.png');
 
-// Default/Mock data structure
-interface BiasData {
-  bias_score: number;
-  bias_label: string;
-  topic?: string;
-  key_terms: string[];
-  transcription?: string;
-  related_articles?: { title: string; url: string; }[];
-}
-
-const mapScoreToLevel = (score: number): BiasLevel => {
-  if (score <= 2) return 'strong-left';
-  if (score <= 4) return 'left';
-  if (score === 5) return 'center';
-  if (score <= 8) return 'right';
-  return 'strong-right';
+const STATUS_TEXT: Record<TrackerState['phase'], string> = {
+  'no-video': 'No video playing',
+  checking: 'Checking…',
+  ready: 'Ready',
+  waiting: 'Waiting for playback',
+  listening: 'Listening',
+  analyzing: 'Analyzing',
+  done: 'Analyzed',
+  error: 'Error',
 };
 
-export const BiasPopup = () => {
-  const [isExpanded, setIsExpanded] = useState(true);
-  const [keywordsOpen, setKeywordsOpen] = useState(false);
-  const [newsOpen, setNewsOpen] = useState(false);
-  const [transcriptionOpen, setTranscriptionOpen] = useState(false);
-  const [data, setData] = useState<BiasData | null>(null);
-  const [status, setStatus] = useState<'idle' | 'recording' | 'analyzing' | 'error' | 'no-video'>('no-video');
-  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+const formatScore = (n: number) => (n > 0 ? `+${n}` : String(n));
 
-  useEffect(() => {
-    // Import dynamically to avoid SSR issues if any, though content script is client-only
-    import('@/logic/recorder').then(({ setupPoliTok }) => {
-      const cleanup = setupPoliTok(
-        (s: any, details?: string) => {
-          setStatus(s);
-          if (details) setErrorDetails(details);
-          else if (s !== 'error') setErrorDetails(null);
-        },
-        (d: any) => {
-          console.log('PoliTok UI: Result received', d);
-          setData(d);
-          setIsExpanded(true); // Auto-expand popup
-          // All other dropdowns (News, Keywords, Transcription) stay closed by default
-        }
-      );
-      return cleanup;
-    });
-  }, []);
+const timeAgo = (iso: string) => {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+};
 
-  // Use data if available, otherwise hide or show loading/placeholder
-  const displayData = data || {
-    bias_score: 5,
-    bias_label: status === 'no-video' ? 'Searching for video...' : 'Waiting...',
-    topic: '',
-    key_terms: [],
-    transcription: '',
-    related_articles: []
-  };
+interface BiasPopupProps {
+  state: TrackerState;
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+  onAnalyze: () => void;
+}
 
-  const statusLabel = {
-    'recording': 'Recording...',
-    'analyzing': 'Gemini is thinking...',
-    'error': 'Analysis Error',
-    'idle': 'Watching',
-    'no-video': 'Idle'
-  }[status];
+export const BiasPopup = ({ state, collapsed, onCollapsedChange, onAnalyze }: BiasPopupProps) => {
+  const busy = state.phase === 'checking' || state.phase === 'listening' || state.phase === 'analyzing';
 
-  if (!isExpanded) {
+  if (collapsed) {
     return (
-      <div className="fixed bottom-4 left-4 glass-panel p-2 flex items-center gap-2 cursor-pointer hover:bg-secondary/50 transition-colors shadow-lg border border-white/20"
-        onClick={() => setIsExpanded(true)}>
-        <img
-          src={(window as any).chrome?.runtime?.getURL('logo.png') || '/logo.png'}
-          alt="Logo"
-          className="w-8 h-8 object-contain"
-        />
-        <div className="flex flex-col">
-          <span className="text-[11px] font-bold text-foreground">PoliTalk</span>
-          <span className="text-[8px] text-muted-foreground uppercase">{statusLabel}</span>
+      <button
+        onClick={() => onCollapsedChange(false)}
+        className="glass-panel flex items-center gap-2 p-2 pr-3 shadow-lg transition-colors hover:bg-secondary/60"
+        aria-label="Open PoliTalk"
+      >
+        <img src={logoUrl} alt="" className="h-7 w-7 object-contain" />
+        <div className="flex flex-col items-start text-left">
+          <span className="text-[11px] font-bold">PoliTalk</span>
+          <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+            {state.phase === 'done' && state.result ? state.result.label : STATUS_TEXT[state.phase]}
+          </span>
         </div>
-        <Eye className="w-3.5 h-3.5 text-muted-foreground ml-1" />
-      </div>
+        {busy && <Loader2 className="ml-1 h-3 w-3 animate-spin text-muted-foreground" />}
+      </button>
     );
   }
 
   return (
-    <div className="fixed bottom-4 left-4 w-[340px] glass-panel p-4 space-y-4 animate-fade-in shadow-2xl border border-white/20 z-[999999]">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="glass-panel flex max-h-[min(640px,calc(100vh-48px))] w-[340px] flex-col shadow-2xl animate-fade-in">
+      <header className="flex items-center justify-between border-b border-white/10 p-3">
         <div className="flex items-center gap-2">
-          <img
-            src={(window as any).chrome?.runtime?.getURL('logo.png') || '/logo.png'}
-            alt="Logo"
-            className="w-10 h-10 object-contain"
-          />
+          <img src={logoUrl} alt="" className="h-8 w-8 object-contain" />
           <div>
-            <h1 className="text-lg font-bold text-foreground tracking-tight mb-0.5">PoliTalk</h1>
+            <h1 className="text-base font-bold leading-tight tracking-tight">PoliTalk</h1>
             <div className="flex items-center gap-1.5">
-              {status === 'analyzing' || status === 'recording' ? (
-                <Loader2 className="w-2.5 h-2.5 animate-spin text-primary" />
+              {busy ? (
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
               ) : (
-                <div className={cn("w-1.5 h-1.5",
-                  status === 'idle' ? "bg-green-500" : "bg-muted-foreground"
-                )} />
+                <span className={cn('h-1.5 w-1.5', state.phase === 'done' ? 'bg-green-500' : state.phase === 'error' ? 'bg-destructive' : 'bg-muted-foreground')} />
               )}
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">{statusLabel}</p>
+              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{STATUS_TEXT[state.phase]}</span>
             </div>
           </div>
         </div>
-        <button
-          onClick={() => setIsExpanded(false)}
-          className="p-1.5 hover:bg-secondary transition-colors"
-        >
-          <EyeOff className="w-4 h-4 text-muted-foreground" />
+        <button onClick={() => onCollapsedChange(true)} className="p-1.5 transition-colors hover:bg-secondary" aria-label="Minimize">
+          <Minus className="h-4 w-4 text-muted-foreground" />
         </button>
-      </div>
+      </header>
 
-      <div className="space-y-4 animate-fade-in">
-        {/* Spectrum */}
-        <div className="relative pt-2">
-          <BiasSpectrum
-            level={data ? mapScoreToLevel(displayData.bias_score) : null}
-            isAnimating={status === 'analyzing' || !data}
-          />
-        </div>
-
-        {/* Status */}
-        <div className="text-center p-3 bg-secondary/30 border border-white/5">
-          <p className="text-lg font-bold tracking-tight text-foreground">{displayData.bias_label}</p>
-        </div>
-
-        {/* Related News Dropdown - Always visible */}
-        <Collapsible open={newsOpen} onOpenChange={setNewsOpen}>
-          <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-secondary/50 hover:bg-secondary transition-colors group">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-foreground">Related News Articles</span>
-            </div>
-            <ChevronDown
-              className={cn(
-                "w-4 h-4 text-muted-foreground transition-transform duration-200 group-hover:text-foreground",
-                newsOpen && "rotate-180"
-              )}
-            />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-3 space-y-2 animate-fade-in">
-            {status === 'error' ? (
-              <div className="p-3 bg-secondary/20 border border-white/5 text-center">
-                <p className="text-xs text-muted-foreground italic">
-                  No news articles available due to analysis error.
-                </p>
-              </div>
-            ) : displayData.related_articles && displayData.related_articles.length > 0 ? (
-              displayData.related_articles
-                .filter(article => {
-                  try {
-                    new URL(article.url);
-                    return true;
-                  } catch {
-                    console.warn('PoliTok: Invalid URL filtered:', article.url);
-                    return false;
-                  }
-                })
-                .map((article, i) => {
-                  let hostname = 'Unknown Source';
-                  try {
-                    hostname = new URL(article.url).hostname.replace('www.', '');
-                  } catch (e) {
-                    console.error('PoliTok: URL parse error:', e);
-                  }
-
-                  return (
-                    <a
-                      key={i}
-                      href={article.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-start gap-2 p-2 rounded-md bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group/link"
-                    >
-                      <LinkIcon className="w-3 h-3 mt-1 text-primary shrink-0" />
-                      <div className="flex-1 space-y-0.5">
-                        <p className="text-xs font-medium text-foreground leading-snug group-hover/link:text-primary transition-colors">
-                          {article.title}
-                        </p>
-                        <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
-                          <span>{hostname}</span>
-                          <ExternalLink className="w-2 h-2" />
-                        </div>
-                      </div>
-                    </a>
-                  );
-                })
-            ) : (
-              <div className="p-3 bg-secondary/20 border border-white/5 text-center">
-                <p className="text-xs text-muted-foreground italic">
-                  {!data || status === 'no-video' 
-                    ? "Waiting for analysis..."
-                    : displayData.bias_label.includes('Non-Political')
-                    ? "No news articles available for non-political content."
-                    : "Not enough context provided in this video to match reliable news articles."}
-                </p>
-              </div>
-            )}
-          </CollapsibleContent>
-        </Collapsible>
-
-        {/* Keywords Dropdown - Always visible */}
-        <Collapsible open={keywordsOpen} onOpenChange={setKeywordsOpen}>
-          <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-secondary/50 hover:bg-secondary transition-colors group">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-foreground">Key Terms</span>
-            </div>
-            <ChevronDown
-              className={cn(
-                "w-4 h-4 text-muted-foreground transition-transform duration-200 group-hover:text-foreground",
-                keywordsOpen && "rotate-180"
-              )}
-            />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-3 animate-fade-in">
-            {displayData.key_terms && displayData.key_terms.length > 0 ? (
-              <KeywordTags keywords={displayData.key_terms} />
-            ) : (
-              <div className="p-3 bg-secondary/20 border border-white/5 text-center">
-                <p className="text-xs text-muted-foreground italic">
-                  {!data || status === 'no-video' 
-                    ? "Waiting for analysis..."
-                    : "No key terms identified in this video."}
-                </p>
-              </div>
-            )}
-          </CollapsibleContent>
-        </Collapsible>
-
-        {/* Transcription Dropdown - Always visible */}
-        <Collapsible open={transcriptionOpen} onOpenChange={setTranscriptionOpen}>
-          <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-secondary/50 hover:bg-secondary transition-colors group">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-foreground">Video Transcription</span>
-            </div>
-            <ChevronDown
-              className={cn(
-                "w-4 h-4 text-muted-foreground transition-transform duration-200 group-hover:text-foreground",
-                transcriptionOpen && "rotate-180"
-              )}
-            />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-3 animate-fade-in">
-            {status === 'error' ? (
-              <div className="p-3 bg-secondary/20 border border-white/5 text-center">
-                <p className="text-xs text-muted-foreground italic">
-                  No transcription available due to analysis error.
-                </p>
-              </div>
-            ) : displayData.transcription ? (
-              <div className="p-3 bg-secondary/20 border border-white/5 max-h-[120px] overflow-y-auto">
-                <p className="text-xs text-foreground italic leading-relaxed">"{displayData.transcription}"</p>
-              </div>
-            ) : (
-              <div className="p-3 bg-secondary/20 border border-white/5 text-center">
-                <p className="text-xs text-muted-foreground italic">
-                  {!data || status === 'no-video' 
-                    ? "Waiting for analysis..."
-                    : "No transcription available for this video."}
-                </p>
-              </div>
-            )}
-          </CollapsibleContent>
-        </Collapsible>
-
-        {/* Error Details */}
-        {status === 'error' && errorDetails && (
-          <div className="p-3 bg-destructive/10 border border-destructive/20 max-h-[100px] overflow-y-auto">
-            <p className="text-[10px] uppercase tracking-wider text-destructive mb-1 font-bold">Error Details</p>
-            <p className="text-xs text-foreground italic leading-relaxed">{errorDetails}</p>
-          </div>
+      <div className="space-y-3 overflow-y-auto p-3">
+        {state.phase === 'done' && state.result ? (
+          <ResultView result={state.result} onReanalyze={onAnalyze} />
+        ) : (
+          <StatusView state={state} onAnalyze={onAnalyze} />
         )}
-
-        {/* Footer */}
-        <div className="pt-3 border-t border-white/10">
-          <p className="text-[10px] text-muted-foreground text-center font-medium">
-            AI-powered analysis • Results are estimates
-          </p>
-        </div>
       </div>
+
+      <footer className="border-t border-white/10 px-3 py-2 text-center text-[10px] text-muted-foreground">
+        AI estimate from a short audio sample · may be wrong
+      </footer>
     </div>
   );
 };
+
+function StatusView({ state, onAnalyze }: { state: TrackerState; onAnalyze: () => void }) {
+  return (
+    <div className="space-y-3">
+      <BiasSpectrum score={null} />
+      <SpectrumLabels />
+      <div className="space-y-3 border border-white/5 bg-secondary/30 p-4 text-center">
+        {state.phase === 'no-video' && <p className="text-sm text-muted-foreground">Play a video to analyze it.</p>}
+        {state.phase === 'checking' && <p className="text-sm text-muted-foreground">Looking for an earlier analysis…</p>}
+        {state.phase === 'waiting' && <p className="text-sm text-muted-foreground">Analysis starts once the video has played for a moment.</p>}
+        {state.phase === 'ready' && (
+          <>
+            <p className="text-sm text-muted-foreground">Analyze this video's speech for political lean.</p>
+            <ActionButton onClick={onAnalyze} icon={<Play className="h-3.5 w-3.5" />}>Analyze this video</ActionButton>
+          </>
+        )}
+        {state.phase === 'listening' && (
+          <>
+            <p className="flex items-center justify-center gap-2 text-sm">
+              <Mic className="h-4 w-4 animate-pulse-slow" /> Listening to a short sample…
+            </p>
+            <div className="h-1 w-full bg-secondary">
+              <div className="h-full bg-foreground transition-[width] duration-500" style={{ width: `${Math.round(state.progress * 100)}%` }} />
+            </div>
+            <p className="text-[10px] text-muted-foreground">Counts only while the video plays. Audio is never stored.</p>
+          </>
+        )}
+        {state.phase === 'analyzing' && (
+          <p className="flex items-center justify-center gap-2 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" /> Transcribing and analyzing…
+          </p>
+        )}
+        {state.phase === 'error' && (
+          <>
+            <p className="flex items-start justify-center gap-2 text-left text-sm">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+              <span>{state.error}</span>
+            </p>
+            <ActionButton onClick={onAnalyze} icon={<RotateCw className="h-3.5 w-3.5" />}>Try again</ActionButton>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ResultView({ result, onReanalyze }: { result: AnalysisResult; onReanalyze: () => void }) {
+  const political = result.is_political;
+  const lowConfidence = political && result.confidence < 50;
+
+  return (
+    <div className="space-y-3 animate-slide-up">
+      <BiasSpectrum score={political ? result.overall_score : null} />
+      <SpectrumLabels />
+
+      <div className="border border-white/5 bg-secondary/30 p-3 text-center">
+        <p className="text-lg font-bold tracking-tight">{result.label}</p>
+        {political && (
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {result.topic && <>{result.topic} · </>}
+            {result.framing && <>{FRAMING_LABELS[result.framing]} · </>}
+            {result.confidence}% confidence
+          </p>
+        )}
+      </div>
+
+      {lowConfidence && (
+        <p className="flex items-start gap-2 border border-yellow-500/20 bg-yellow-500/10 p-2 text-[11px] leading-snug">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-yellow-400" />
+          Low confidence: the sample was short, ambiguous, or possibly sarcastic. Treat this score with caution.
+        </p>
+      )}
+
+      {result.reasoning && <p className="text-xs leading-relaxed text-foreground/90">{result.reasoning}</p>}
+
+      {political && (result.economic_score !== null || result.social_score !== null) && (
+        <div className="space-y-2">
+          <AxisRow label="Economic" score={result.economic_score} />
+          <AxisRow label="Social" score={result.social_score} />
+        </div>
+      )}
+
+      {result.evidence.length > 0 && (
+        <Section title="Why this score" defaultOpen>
+          <ul className="space-y-2">
+            {result.evidence.map((e) => (
+              <li key={e.quote} className="border-l-2 border-white/20 pl-2">
+                <p className="flex gap-1 text-xs italic">
+                  <Quote className="h-3 w-3 shrink-0 rotate-180 text-muted-foreground" />
+                  {e.quote}
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">{e.explanation}</p>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {political && (
+        <Section title="Related coverage" count={result.related_articles.length}>
+          {result.related_articles.length > 0 ? (
+            <div className="space-y-1.5">
+              {result.related_articles.map((article) => (
+                <a
+                  key={article.url}
+                  href={article.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group/link block border border-white/5 bg-white/5 p-2 transition-colors hover:bg-white/10"
+                >
+                  <p className="text-xs font-medium leading-snug">{article.title}</p>
+                  <p className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                    {article.source} <ExternalLink className="h-2.5 w-2.5" />
+                  </p>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <Empty>No matching coverage from the trusted outlet list.</Empty>
+          )}
+        </Section>
+      )}
+
+      {result.key_terms.length > 0 && (
+        <Section title="Key terms">
+          <KeywordTags keywords={result.key_terms} />
+        </Section>
+      )}
+
+      <Section title="Transcript">
+        {result.transcription ? (
+          <p className="max-h-[140px] overflow-y-auto border border-white/5 bg-secondary/20 p-2 text-xs italic leading-relaxed">
+            “{result.transcription}”
+          </p>
+        ) : (
+          <Empty>No speech detected.</Empty>
+        )}
+      </Section>
+
+      <div className="flex items-center justify-between pt-1 text-[10px] text-muted-foreground">
+        <span>
+          {result.sample_seconds ? `${result.sample_seconds}s sample · ` : ''}
+          {result.cached ? 'saved ' : ''}{timeAgo(result.analyzed_at)}
+        </span>
+        <button onClick={onReanalyze} className="flex items-center gap-1 px-1.5 py-1 transition-colors hover:bg-secondary hover:text-foreground">
+          <RotateCw className="h-3 w-3" /> Re-analyze
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SpectrumLabels() {
+  return (
+    <div className="-mt-1 flex justify-between text-[10px] font-medium text-muted-foreground">
+      <span className="text-bias-left">Left</span>
+      <span>Center</span>
+      <span className="text-bias-right">Right</span>
+    </div>
+  );
+}
+
+function AxisRow({ label, score }: { label: string; score: number | null }) {
+  return (
+    <div className="grid grid-cols-[64px_1fr_28px] items-center gap-2 text-[11px]">
+      <span className="text-muted-foreground">{label}</span>
+      <BiasSpectrum score={score} size="sm" />
+      <span className="text-right tabular-nums text-muted-foreground">{score === null ? 'n/a' : formatScore(score)}</span>
+    </div>
+  );
+}
+
+function Section({ title, count, defaultOpen = false, children }: { title: string; count?: number; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="group flex w-full items-center justify-between bg-secondary/50 px-3 py-2 transition-colors hover:bg-secondary">
+        <span className="text-xs font-medium">
+          {title}
+          {count !== undefined && <span className="ml-1.5 text-muted-foreground">{count}</span>}
+        </span>
+        <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform duration-200', open && 'rotate-180')} />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pt-2 animate-fade-in">{children}</CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function ActionButton({ onClick, icon, children }: { onClick: () => void; icon: ReactNode; children: ReactNode }) {
+  return (
+    <button onClick={onClick} className="inline-flex items-center gap-1.5 bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90">
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+function Empty({ children }: { children: ReactNode }) {
+  return <p className="border border-white/5 bg-secondary/20 p-2 text-center text-xs italic text-muted-foreground">{children}</p>;
+}
